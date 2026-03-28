@@ -3,8 +3,10 @@ FROM node:20-slim AS frontend-build
 
 WORKDIR /frontend
 
-# Copy package files and lockfile, then install deps
-COPY frontend/package.json frontend/yarn.lock ./
+# Copy package files, then install deps
+COPY frontend/package.json ./
+# Copy lockfile if it exists (may not be in all repos)
+COPY frontend/yarn.loc[k] ./
 # Remove platform-specific dev dependency that isn't on public npm
 RUN sed -i '/@emergentbase/d' package.json
 RUN yarn install --network-timeout 120000 --ignore-engines
