@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Play,
   Trash2,
@@ -9,6 +9,8 @@ import {
   Terminal,
   Clock,
   ChevronDown,
+  FileCode2,
+  Braces,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -50,6 +52,213 @@ function JsonOutput({ data }) {
       className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-[#E5E5E5]"
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  );
+}
+
+function generateCurl(tool, baseUrl) {
+  const isAttachment = tool.name === "create_message_with_attachment";
+  const endpoint = isAttachment
+    ? `${baseUrl}/api/tools/execute-with-file`
+    : `${baseUrl}/api/tools/execute`;
+
+  if (isAttachment) {
+    const paramObj = {};
+    tool.parameters.forEach((p) => {
+      if (p.name === "file_url") return;
+      paramObj[p.name] = p.type === "int" || p.type === "integer" ? 0 : p.type === "bool" || p.type === "boolean" ? false : `<${p.name}>`;
+    });
+    return [
+      `curl -X POST '${endpoint}' \\`,
+      `  -F 'tool_name=${tool.name}' \\`,
+      `  -F 'parameters=${JSON.stringify(paramObj)}' \\`,
+      `  -F 'file=@/path/to/file.png'`,
+    ].join("\n");
+  }
+
+  const paramObj = {};
+  tool.parameters.forEach((p) => {
+    if (p.type === "int" || p.type === "integer") paramObj[p.name] = 0;
+    else if (p.type === "bool" || p.type === "boolean") paramObj[p.name] = false;
+    else if (p.type === "list") paramObj[p.name] = [];
+    else paramObj[p.name] = `<${p.name}>`;
+  });
+
+  const body = JSON.stringify({ tool_name: tool.name, parameters: paramObj }, null, 2);
+  return [
+    `curl -X POST '${endpoint}' \\`,
+    `  -H 'Content-Type: application/json' \\`,
+    `  -d '${body}'`,
+  ].join("\n");
+}
+
+function ApiDocPanel({ tool }) {
+  const [copiedField, setCopiedField] = useState(null);
+  const baseUrl = (process.env.REACT_APP_BACKEND_URL || window.location.origin).replace(/\/$/, "");
+
+  const isAttachment = tool.name === "create_message_with_attachment";
+  const endpoint = isAttachment ? "/api/tools/execute-with-file" : "/api/tools/execute";
+  const method = "POST";
+  const fullUrl = `${baseUrl}${endpoint}`;
+
+  const curlExample = useMemo(() => generateCurl(tool, baseUrl), [tool, baseUrl]);
+
+  const bodySchema = useMemo(() => {
+    if (isAttachment) {
+      return {
+        type: "multipart/form-data",
+        fields: [
+          { name: "tool_name", type: "string", value: tool.name, desc: "Fixed tool identifier" },
+          {
+            name: "parameters",
+            type: "JSON string",
+            value: "{}",
+            desc: "Tool parameters as JSON",
+          },
+          { name: "file", type: "binary", value: "(file)", desc: "File attachment" },
+        ],
+      };
+    }
+    return {
+      type: "application/json",
+      shape: {
+        tool_name: tool.name,
+        parameters: Object.fromEntries(
+          tool.parameters.map((p) => [
+            p.name,
+            `(${p.type || "string"}${p.required ? ", required" : ""})`,
+          ])
+        ),
+      },
+    };
+  }, [tool, isAttachment]);
+
+  const copyText = (text, field) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
+  };
+
+  const CopyBtn = ({ text, field }) => (
+    <button
+      onClick={() => copyText(text, field)}
+      className="absolute top-2 right-2 p-1 text-[#555] hover:text-[#00E559] transition-colors"
+      title="Copy"
+      data-testid={`copy-${field}`}
+    >
+      {copiedField === field ? (
+        <Check className="w-3 h-3 text-[#00E559]" />
+      ) : (
+        <Copy className="w-3 h-3" />
+      )}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col overflow-hidden" data-testid="api-doc-panel">
+      {/* Header */}
+      <div className="px-4 py-2 border-b border-[#222] flex items-center gap-2">
+        <FileCode2 className="w-3.5 h-3.5 text-[#00E559]" />
+        <span className="font-mono text-[10px] text-[#00E559] uppercase tracking-wider font-semibold">
+          REST API Endpoint
+        </span>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="p-3 space-y-3">
+          {/* Endpoint URL */}
+          <div className="relative">
+            <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+              Endpoint
+            </span>
+            <div className="bg-[#111] border border-[#222] p-2 pr-8 font-mono text-xs">
+              <span className="text-[#FF9500] font-bold">{method}</span>{" "}
+              <span className="text-[#E5E5E5] break-all">{fullUrl}</span>
+            </div>
+            <CopyBtn text={fullUrl} field="url" />
+          </div>
+
+          {/* Headers */}
+          <div>
+            <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+              Headers
+            </span>
+            <div className="bg-[#111] border border-[#222] p-2 font-mono text-[11px] space-y-0.5">
+              {isAttachment ? (
+                <div>
+                  <span className="text-[#888]">Content-Type:</span>{" "}
+                  <span className="text-[#00BFFF]">multipart/form-data</span>
+                </div>
+              ) : (
+                <div>
+                  <span className="text-[#888]">Content-Type:</span>{" "}
+                  <span className="text-[#00BFFF]">application/json</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Request Body Schema */}
+          <div className="relative">
+            <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+              Request Body
+            </span>
+            {isAttachment ? (
+              <div className="bg-[#111] border border-[#222] p-2 pr-8 font-mono text-[11px] space-y-1">
+                {bodySchema.fields.map((f) => (
+                  <div key={f.name} className="flex gap-2">
+                    <span className="text-[#00E559]">{f.name}</span>
+                    <span className="text-[#666]">({f.type})</span>
+                    <span className="text-[#555] text-[10px]">— {f.desc}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-[#111] border border-[#222] p-2 pr-8">
+                <pre className="font-mono text-[11px] text-[#E5E5E5] whitespace-pre-wrap">
+                  {JSON.stringify(bodySchema.shape, null, 2)}
+                </pre>
+                <CopyBtn text={JSON.stringify(bodySchema.shape, null, 2)} field="body" />
+              </div>
+            )}
+          </div>
+
+          {/* Parameter Details */}
+          {tool.parameters.length > 0 && (
+            <div>
+              <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+                Parameters
+              </span>
+              <div className="bg-[#111] border border-[#222] divide-y divide-[#222]">
+                {tool.parameters.map((p) => (
+                  <div key={p.name} className="px-2 py-1.5 flex items-start gap-2 font-mono text-[11px]">
+                    <span className="text-[#00E559] flex-shrink-0">{p.name}</span>
+                    <span className="text-[#666] flex-shrink-0">
+                      {p.type || "string"}{p.required ? "" : "?"}
+                    </span>
+                    {p.description && (
+                      <span className="text-[#555] text-[10px] truncate">{p.description}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* cURL Example */}
+          <div className="relative">
+            <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-1">
+              cURL Example
+            </span>
+            <div className="bg-[#111] border border-[#222] p-2 pr-8">
+              <pre className="font-mono text-[11px] text-[#E5E5E5] whitespace-pre-wrap break-all">
+                {curlExample}
+              </pre>
+            </div>
+            <CopyBtn text={curlExample} field="curl" />
+          </div>
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -157,6 +366,8 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
     setParams((prev) => ({ ...prev, [name]: value }));
   };
 
+  const [activePane, setActivePane] = useState("execute");
+
   return (
     <div
       className="terminal-panel w-full md:w-[400px] lg:w-[500px] flex-shrink-0 bg-[#0A0A0A] text-[#00E559] flex flex-col overflow-hidden relative"
@@ -165,37 +376,61 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
       {/* Scanline overlay */}
       <div className="terminal-scanline" />
 
-      {/* Header */}
-      <div className="relative z-10 px-4 py-3 border-b border-[#222] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-4 h-4 text-[#00E559]" />
-          <h3 className="font-mono text-sm font-semibold text-[#00E559] uppercase tracking-wider">
+      {/* Tab Header */}
+      <div className="relative z-10 px-2 py-0 border-b border-[#222] flex items-center justify-between">
+        <div className="flex items-center">
+          <button
+            onClick={() => setActivePane("execute")}
+            className={`px-3 py-2.5 font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 border-b-2 transition-colors ${
+              activePane === "execute"
+                ? "text-[#00E559] border-[#00E559]"
+                : "text-[#555] border-transparent hover:text-[#888]"
+            }`}
+            data-testid="tab-live-testing"
+          >
+            <Terminal className="w-3.5 h-3.5" />
             Live Testing
-          </h3>
+          </button>
+          <button
+            onClick={() => setActivePane("docs")}
+            className={`px-3 py-2.5 font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 border-b-2 transition-colors ${
+              activePane === "docs"
+                ? "text-[#00E559] border-[#00E559]"
+                : "text-[#555] border-transparent hover:text-[#888]"
+            }`}
+            data-testid="tab-api-docs"
+          >
+            <FileCode2 className="w-3.5 h-3.5" />
+            API Docs
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          {elapsed !== null && (
+        <div className="flex items-center gap-2 pr-1">
+          {activePane === "execute" && elapsed !== null && (
             <span className="font-mono text-[10px] text-[#666] flex items-center gap-1" data-testid="execution-time">
               <Clock className="w-3 h-3" />
               {elapsed}ms
             </span>
           )}
-          <button
-            onClick={handleClear}
-            className="text-[#666] hover:text-[#999] transition-colors"
-            title="Clear output"
-            data-testid="clear-output-button"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleCopy}
-            className="text-[#666] hover:text-[#999] transition-colors"
-            title="Copy output"
-            data-testid="copy-output-button"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-[#00E559]" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
+          {activePane === "execute" && (
+            <>
+              <button
+                onClick={handleClear}
+                className="text-[#666] hover:text-[#999] transition-colors"
+                title="Clear output"
+                data-testid="clear-output-button"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={handleCopy}
+                className="text-[#666] hover:text-[#999] transition-colors"
+                title="Copy output"
+                data-testid="copy-output-button"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-[#00E559]" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -209,7 +444,7 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
               <p className="font-mono text-xs text-[#333] mt-1">Choose from the Tool Explorer panel</p>
             </div>
           </div>
-        ) : (
+        ) : activePane === "execute" ? (
           <>
             {/* Tool Name */}
             <div className="px-4 py-2 border-b border-[#222]">
@@ -333,11 +568,14 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
               </div>
             </ScrollArea>
           </>
+        ) : (
+          /* API Documentation Pane */
+          <ApiDocPanel tool={selectedTool} />
         )}
       </div>
 
       {/* History */}
-      {history.length > 0 && (
+      {history.length > 0 && activePane === "execute" && (
         <details className="relative z-10 border-t border-[#222]">
           <summary className="px-4 py-2 cursor-pointer font-mono text-[10px] text-[#666] uppercase tracking-wider hover:text-[#999] flex items-center gap-1.5">
             <ChevronDown className="w-3 h-3" />

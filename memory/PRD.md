@@ -36,6 +36,7 @@ Build a complete MCP (Model Context Protocol) server for Chatwoot Application AP
   - Webhooks (list, create, update, delete, **setup listener**)
   - Reports (get)
   - **Advanced Filters** (filter_conversations_advanced)
+- **Discovery Tools**: `start_here`, `list_tools`, `search_tools` with TOON compression toggle
 - **Frontend Dashboard** with 3 tabs: Tools, Filters, Webhooks
 - **Conversation Filter Builder** - Visual UI with attribute/operator/value dropdowns, AND/OR logic, payload preview
 - **File Attachment Support** - Upload files via URL or direct upload in messages
@@ -45,23 +46,29 @@ Build a complete MCP (Model Context Protocol) server for Chatwoot Application AP
 - **stdio Transport** via `python mcp_stdio.py`
 - **Config Persistence** in MongoDB
 
+### Added (2026-03-29)
+- **TestTerminal API Docs Tab** - Split terminal into "Live Testing" + "API Docs" tabs
+  - Auto-generated REST endpoint URL, headers, request body schema
+  - Parameter type reference table
+  - Ready-to-copy cURL example with copy button
+  - Supports both JSON (`/api/tools/execute`) and multipart (`/api/tools/execute-with-file`) endpoints
+
 ## Prioritized Backlog
 ### P0 (Critical) - Done
 - All core Chatwoot API tools implemented
+- Discovery tools with TOON compression
+- API Docs tab in TestTerminal
 
 ### P1 (Important)
-- Conversation filter tool with advanced payload building UI
-- File attachment support for messages
+- Conversation filter tool with advanced payload building UI (DONE)
+- File attachment support for messages (DONE)
 - Bulk operations (assign multiple conversations, etc.)
 
 ### P2 (Nice to Have)
 - Claude Desktop / Cursor integration guide with JSON config
-- Webhook event listener for real-time updates
+- Webhook event listener for real-time updates (DONE)
 - Dashboard analytics (tool usage stats, response times)
 - Export/import configuration
 
 ## Next Tasks
-1. Add Claude Desktop integration guide with copy-paste JSON config
-2. Add more comprehensive error handling for API failures
-3. Add conversation filter builder UI
-4. Add webhook event streaming
+- No pending tasks. All user-requested features implemented.
