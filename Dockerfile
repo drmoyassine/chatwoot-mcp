@@ -1,11 +1,13 @@
 # ── Stage 1: Build the React frontend ──
-FROM node:18-slim AS frontend-build
+FROM node:20-slim AS frontend-build
 
 WORKDIR /frontend
 
-# Copy package files and install deps
-COPY frontend/package.json frontend/yarn.lock* ./
-RUN yarn install --frozen-lockfile --network-timeout 120000 2>/dev/null || yarn install --network-timeout 120000
+# Copy package files and lockfile, then install deps
+COPY frontend/package.json frontend/yarn.lock ./
+# Remove platform-specific dev dependency that isn't on public npm
+RUN sed -i '/@emergentbase/d' package.json
+RUN yarn install --network-timeout 120000 --ignore-engines
 
 # Copy source and build
 COPY frontend/ ./
