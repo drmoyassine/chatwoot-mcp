@@ -26,13 +26,49 @@ def set_runtime_config(url: str, token: str, account_id: int):
     _runtime_config["account_id"] = account_id
 
 
-def _get_client() -> ChatwootClient:
-    """Get a ChatwootClient from runtime config, falling back to env vars."""
+async def _load_config_from_db():
+    """Last-resort: load config directly from MongoDB if runtime config is empty."""
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "chatwoot_mcp")
+        client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=3000)
+        db = client[db_name]
+        config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
+        client.close()
+        if config and config.get("chatwoot_url"):
+            set_runtime_config(
+                config["chatwoot_url"],
+                config.get("api_token", ""),
+                config.get("account_id", 0),
+            )
+            logger.info(f"MCP tools loaded config from DB: {config['chatwoot_url']}")
+            return True
+    except Exception as e:
+        logger.warning(f"Failed to load config from DB: {e}")
+    return False
+
+
+async def _get_client() -> ChatwootClient:
+    """Get a ChatwootClient from runtime config, env vars, or MongoDB."""
     base_url = _runtime_config["chatwoot_url"] or os.environ.get("CHATWOOT_URL", "")
     api_token = _runtime_config["api_token"] or os.environ.get("CHATWOOT_API_TOKEN", "")
-    account_id = _runtime_config["account_id"] or int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0"))
+    account_id = _runtime_config["account_id"] or int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
+
+    # If still empty, try loading from MongoDB
     if not base_url or not api_token or not account_id:
-        raise ValueError("Chatwoot configuration missing. Set CHATWOOT_URL, CHATWOOT_API_TOKEN, CHATWOOT_ACCOUNT_ID env vars or configure via the dashboard UI.")
+        loaded = await _load_config_from_db()
+        if loaded:
+            base_url = _runtime_config["chatwoot_url"]
+            api_token = _runtime_config["api_token"]
+            account_id = _runtime_config["account_id"]
+
+    if not base_url or not api_token or not account_id:
+        raise ValueError(
+            "Chatwoot not configured. Either:\n"
+            "1. Set CHATWOOT_URL, CHATWOOT_API_TOKEN, CHATWOOT_ACCOUNT_ID env vars, or\n"
+            "2. Open the dashboard UI and save your config there."
+        )
     return ChatwootClient(base_url, api_token, account_id)
 
 
@@ -47,7 +83,7 @@ def _json(data) -> str:
 @mcp.tool()
 async def get_account() -> str:
     """Get details of the current Chatwoot account including name, locale, features, and settings."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_account()
     return _json(result)
 
@@ -55,7 +91,7 @@ async def get_account() -> str:
 @mcp.tool()
 async def update_account(name: Optional[str] = None, locale: Optional[str] = None) -> str:
     """Update the current Chatwoot account details like name or locale."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.update_account(name=name, locale=locale)
     return _json(result)
 
@@ -67,7 +103,7 @@ async def update_account(name: Optional[str] = None, locale: Optional[str] = Non
 @mcp.tool()
 async def list_agents() -> str:
     """List all agents in the Chatwoot account. Returns agent ID, name, email, role, availability."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_agents()
     return _json(result)
 
@@ -75,7 +111,7 @@ async def list_agents() -> str:
 @mcp.tool()
 async def add_agent(name: str, email: str, role: str = "agent") -> str:
     """Add a new agent to the Chatwoot account. Role can be 'agent' or 'administrator'."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.add_agent(name=name, email=email, role=role)
     return _json(result)
 
@@ -85,7 +121,7 @@ async def update_agent(agent_id: int, name: Optional[str] = None,
                         role: Optional[str] = None,
                         availability: Optional[str] = None) -> str:
     """Update an existing agent's name, role, or availability status."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if name:
         kwargs["name"] = name
@@ -100,7 +136,7 @@ async def update_agent(agent_id: int, name: Optional[str] = None,
 @mcp.tool()
 async def remove_agent(agent_id: int) -> str:
     """Remove an agent from the Chatwoot account by their ID."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.remove_agent(agent_id)
     return _json(result)
 
@@ -112,7 +148,7 @@ async def remove_agent(agent_id: int) -> str:
 @mcp.tool()
 async def list_contacts(page: int = 1, sort: Optional[str] = None) -> str:
     """List all contacts with pagination (15 per page). Sort by: name, email, phone_number, last_activity_at (prefix with - for descending)."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_contacts(page=page, sort=sort)
     return _json(result)
 
@@ -122,7 +158,7 @@ async def create_contact(name: str, email: Optional[str] = None,
                           phone_number: Optional[str] = None,
                           identifier: Optional[str] = None) -> str:
     """Create a new contact in Chatwoot with name, email, phone number, or external identifier."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if identifier:
         kwargs["identifier"] = identifier
@@ -133,7 +169,7 @@ async def create_contact(name: str, email: Optional[str] = None,
 @mcp.tool()
 async def get_contact(contact_id: int) -> str:
     """Get detailed information about a specific contact by their ID."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_contact(contact_id)
     return _json(result)
 
@@ -143,7 +179,7 @@ async def update_contact(contact_id: int, name: Optional[str] = None,
                           email: Optional[str] = None,
                           phone_number: Optional[str] = None) -> str:
     """Update an existing contact's name, email, or phone number."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if name:
         kwargs["name"] = name
@@ -158,7 +194,7 @@ async def update_contact(contact_id: int, name: Optional[str] = None,
 @mcp.tool()
 async def delete_contact(contact_id: int) -> str:
     """Delete a contact from Chatwoot by their ID."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_contact(contact_id)
     return _json(result)
 
@@ -166,7 +202,7 @@ async def delete_contact(contact_id: int) -> str:
 @mcp.tool()
 async def search_contacts(q: str, page: int = 1) -> str:
     """Search contacts by name, email, phone number, or identifier. Returns matching contacts with pagination."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.search_contacts(q=q, page=page)
     return _json(result)
 
@@ -174,7 +210,7 @@ async def search_contacts(q: str, page: int = 1) -> str:
 @mcp.tool()
 async def get_contact_conversations(contact_id: int) -> str:
     """Get all conversations associated with a specific contact."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_contact_conversations(contact_id)
     return _json(result)
 
@@ -189,7 +225,7 @@ async def list_conversations(assignee_type: str = "all", status: str = "open",
                               inbox_id: Optional[int] = None,
                               team_id: Optional[int] = None) -> str:
     """List conversations with filters. assignee_type: me/unassigned/all/assigned. status: all/open/resolved/pending/snoozed. Supports search query and inbox/team filtering."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_conversations(
         assignee_type=assignee_type, status=status, page=page,
         q=q, inbox_id=inbox_id, team_id=team_id,
@@ -205,7 +241,7 @@ async def create_conversation(inbox_id: int, contact_id: Optional[int] = None,
                                team_id: Optional[int] = None,
                                message: Optional[str] = None) -> str:
     """Create a new conversation in Chatwoot. Requires inbox_id. Optionally set contact, assignee, team, initial message, and status."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_conversation(
         inbox_id=inbox_id, contact_id=contact_id, source_id=source_id,
         status=status, assignee_id=assignee_id, team_id=team_id, message=message,
@@ -216,7 +252,7 @@ async def create_conversation(inbox_id: int, contact_id: Optional[int] = None,
 @mcp.tool()
 async def get_conversation(conversation_id: int) -> str:
     """Get details of a specific conversation by its ID, including messages, meta info, and status."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_conversation(conversation_id)
     return _json(result)
 
@@ -224,7 +260,7 @@ async def get_conversation(conversation_id: int) -> str:
 @mcp.tool()
 async def get_conversation_counts() -> str:
     """Get conversation counts grouped by status (open, resolved, pending, etc.) and assignee type."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_conversation_counts()
     return _json(result)
 
@@ -232,7 +268,7 @@ async def get_conversation_counts() -> str:
 @mcp.tool()
 async def toggle_conversation_status(conversation_id: int, status: str) -> str:
     """Toggle a conversation's status. Status options: open, resolved, pending, snoozed."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.toggle_conversation_status(conversation_id, status)
     return _json(result)
 
@@ -242,7 +278,7 @@ async def assign_conversation(conversation_id: int,
                                assignee_id: Optional[int] = None,
                                team_id: Optional[int] = None) -> str:
     """Assign a conversation to an agent and/or team. Pass assignee_id for agent, team_id for team."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.assign_conversation(conversation_id, assignee_id=assignee_id, team_id=team_id)
     return _json(result)
 
@@ -250,7 +286,7 @@ async def assign_conversation(conversation_id: int,
 @mcp.tool()
 async def get_conversation_labels(conversation_id: int) -> str:
     """Get all labels assigned to a specific conversation."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_conversation_labels(conversation_id)
     return _json(result)
 
@@ -258,7 +294,7 @@ async def get_conversation_labels(conversation_id: int) -> str:
 @mcp.tool()
 async def add_conversation_labels(conversation_id: int, labels: list) -> str:
     """Add or set labels on a conversation. Provide a list of label names."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.add_conversation_labels(conversation_id, labels)
     return _json(result)
 
@@ -271,7 +307,7 @@ async def add_conversation_labels(conversation_id: int, labels: list) -> str:
 async def get_messages(conversation_id: int, after: Optional[int] = None,
                         before: Optional[int] = None) -> str:
     """Get all messages in a conversation. Use 'after' to paginate forward, 'before' to paginate backward."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_messages(conversation_id, after=after, before=before)
     return _json(result)
 
@@ -282,7 +318,7 @@ async def create_message(conversation_id: int, content: str,
                           private: bool = False,
                           content_type: str = "text") -> str:
     """Send a new message in a conversation. message_type: outgoing/incoming. Set private=true for internal notes. content_type: text/input_email/cards/input_select/form/article."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_message(
         conversation_id, content, message_type=message_type,
         private=private, content_type=content_type,
@@ -293,7 +329,7 @@ async def create_message(conversation_id: int, content: str,
 @mcp.tool()
 async def delete_message(conversation_id: int, message_id: int) -> str:
     """Delete a specific message and its attachments from a conversation."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_message(conversation_id, message_id)
     return _json(result)
 
@@ -305,7 +341,7 @@ async def delete_message(conversation_id: int, message_id: int) -> str:
 @mcp.tool()
 async def list_inboxes() -> str:
     """List all inboxes in the account including their type, channel details, and configuration."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_inboxes()
     return _json(result)
 
@@ -313,7 +349,7 @@ async def list_inboxes() -> str:
 @mcp.tool()
 async def get_inbox(inbox_id: int) -> str:
     """Get details of a specific inbox by its ID."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_inbox(inbox_id)
     return _json(result)
 
@@ -322,7 +358,7 @@ async def get_inbox(inbox_id: int) -> str:
 async def create_inbox(name: str, channel_type: str = "web_widget",
                         website_url: Optional[str] = None) -> str:
     """Create a new inbox. channel_type examples: web_widget, api. For web_widget, provide website_url."""
-    client = _get_client()
+    client = await _get_client()
     channel = {"type": channel_type}
     if website_url:
         channel["website_url"] = website_url
@@ -334,7 +370,7 @@ async def create_inbox(name: str, channel_type: str = "web_widget",
 async def update_inbox(inbox_id: int, name: Optional[str] = None,
                         enable_auto_assignment: Optional[bool] = None) -> str:
     """Update an inbox's name or auto-assignment setting."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if name:
         kwargs["name"] = name
@@ -351,7 +387,7 @@ async def update_inbox(inbox_id: int, name: Optional[str] = None,
 @mcp.tool()
 async def list_teams() -> str:
     """List all teams in the Chatwoot account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_teams()
     return _json(result)
 
@@ -359,7 +395,7 @@ async def list_teams() -> str:
 @mcp.tool()
 async def create_team(name: str, description: Optional[str] = None) -> str:
     """Create a new team with a name and optional description."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_team(name=name, description=description)
     return _json(result)
 
@@ -367,7 +403,7 @@ async def create_team(name: str, description: Optional[str] = None) -> str:
 @mcp.tool()
 async def get_team(team_id: int) -> str:
     """Get details of a specific team by its ID."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_team(team_id)
     return _json(result)
 
@@ -376,7 +412,7 @@ async def get_team(team_id: int) -> str:
 async def update_team(team_id: int, name: Optional[str] = None,
                        description: Optional[str] = None) -> str:
     """Update a team's name or description."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if name:
         kwargs["name"] = name
@@ -389,7 +425,7 @@ async def update_team(team_id: int, name: Optional[str] = None,
 @mcp.tool()
 async def delete_team(team_id: int) -> str:
     """Delete a team from the Chatwoot account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_team(team_id)
     return _json(result)
 
@@ -401,7 +437,7 @@ async def delete_team(team_id: int) -> str:
 @mcp.tool()
 async def list_labels() -> str:
     """List all labels in the Chatwoot account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_labels()
     return _json(result)
 
@@ -411,7 +447,7 @@ async def create_label(title: str, description: Optional[str] = None,
                         color: Optional[str] = None,
                         show_on_sidebar: bool = True) -> str:
     """Create a new label with title, optional description, color (hex), and sidebar visibility."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_label(title=title, description=description,
                                         color=color, show_on_sidebar=show_on_sidebar)
     return _json(result)
@@ -422,7 +458,7 @@ async def update_label(label_id: int, title: Optional[str] = None,
                         description: Optional[str] = None,
                         color: Optional[str] = None) -> str:
     """Update a label's title, description, or color."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if title:
         kwargs["title"] = title
@@ -437,7 +473,7 @@ async def update_label(label_id: int, title: Optional[str] = None,
 @mcp.tool()
 async def delete_label(label_id: int) -> str:
     """Delete a label from the Chatwoot account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_label(label_id)
     return _json(result)
 
@@ -449,7 +485,7 @@ async def delete_label(label_id: int) -> str:
 @mcp.tool()
 async def list_canned_responses() -> str:
     """List all canned responses (pre-written message templates) in the account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_canned_responses()
     return _json(result)
 
@@ -457,7 +493,7 @@ async def list_canned_responses() -> str:
 @mcp.tool()
 async def create_canned_response(short_code: str, content: str) -> str:
     """Create a new canned response with a short_code trigger and message content."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_canned_response(short_code=short_code, content=content)
     return _json(result)
 
@@ -467,7 +503,7 @@ async def update_canned_response(canned_response_id: int,
                                   short_code: Optional[str] = None,
                                   content: Optional[str] = None) -> str:
     """Update a canned response's short_code or content."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if short_code:
         kwargs["short_code"] = short_code
@@ -480,7 +516,7 @@ async def update_canned_response(canned_response_id: int,
 @mcp.tool()
 async def delete_canned_response(canned_response_id: int) -> str:
     """Delete a canned response from the account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_canned_response(canned_response_id)
     return _json(result)
 
@@ -492,7 +528,7 @@ async def delete_canned_response(canned_response_id: int) -> str:
 @mcp.tool()
 async def list_custom_attributes(attribute_model: str = "conversation_attribute") -> str:
     """List custom attribute definitions. attribute_model: conversation_attribute or contact_attribute."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_custom_attributes(attribute_model=attribute_model)
     return _json(result)
 
@@ -504,7 +540,7 @@ async def create_custom_attribute(attribute_display_name: str,
                                    attribute_model: int,
                                    attribute_key: str) -> str:
     """Create a custom attribute definition. attribute_display_type: 0=text, 1=number, 2=currency, 3=percent, 4=link, 5=date, 6=list, 7=checkbox. attribute_model: 0=conversation, 1=contact."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_custom_attribute(
         attribute_display_name=attribute_display_name,
         attribute_display_type=attribute_display_type,
@@ -522,7 +558,7 @@ async def create_custom_attribute(attribute_display_name: str,
 @mcp.tool()
 async def list_webhooks() -> str:
     """List all webhooks configured in the account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.list_webhooks()
     return _json(result)
 
@@ -530,7 +566,7 @@ async def list_webhooks() -> str:
 @mcp.tool()
 async def create_webhook(url: str, subscriptions: Optional[list] = None) -> str:
     """Create a webhook. Subscriptions: message_created, message_updated, conversation_created, conversation_status_changed, conversation_updated, contact_created, contact_updated."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.create_webhook(url=url, subscriptions=subscriptions)
     return _json(result)
 
@@ -539,7 +575,7 @@ async def create_webhook(url: str, subscriptions: Optional[list] = None) -> str:
 async def update_webhook(webhook_id: int, url: Optional[str] = None,
                           subscriptions: Optional[list] = None) -> str:
     """Update a webhook's URL or subscriptions."""
-    client = _get_client()
+    client = await _get_client()
     kwargs = {}
     if url:
         kwargs["url"] = url
@@ -552,7 +588,7 @@ async def update_webhook(webhook_id: int, url: Optional[str] = None,
 @mcp.tool()
 async def delete_webhook(webhook_id: int) -> str:
     """Delete a webhook from the account."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.delete_webhook(webhook_id)
     return _json(result)
 
@@ -567,7 +603,7 @@ async def get_account_reports(metric: str = "account",
                                since: Optional[str] = None,
                                until: Optional[str] = None) -> str:
     """Get account reports and analytics. metric/report_type: account, agent, inbox, label, team."""
-    client = _get_client()
+    client = await _get_client()
     result = await client.get_account_reports(metric=metric, report_type=report_type,
                                                since=since, until=until)
     return _json(result)
@@ -588,7 +624,7 @@ async def filter_conversations_advanced(filters_json: str, page: int = 1) -> str
     Priority values: none, low, medium, high, urgent.
     The last filter in the list should have query_operator as null.
     Example: [{"attribute_key":"status","filter_operator":"equal_to","values":["open"],"query_operator":"AND"},{"attribute_key":"assignee_id","filter_operator":"equal_to","values":[1],"query_operator":null}]"""
-    client = _get_client()
+    client = await _get_client()
     try:
         payload = json.loads(filters_json)
     except json.JSONDecodeError as e:
@@ -608,7 +644,7 @@ async def create_message_with_attachment(conversation_id: int, content: str,
                                           message_type: str = "outgoing",
                                           private: bool = False) -> str:
     """Send a message with a file attachment in a conversation. Provide file_url pointing to the file to attach (http/https URL). Optionally specify filename. message_type: outgoing/incoming. Set private=true for internal notes."""
-    client = _get_client()
+    client = await _get_client()
     # Download the file
     async with httpx.AsyncClient(timeout=30) as http:
         file_resp = await http.get(file_url)
@@ -635,7 +671,7 @@ async def setup_webhook_listener(webhook_url: str,
     """Register a webhook in Chatwoot to receive real-time events. Provide the URL that should receive webhook POST events.
     Optional subscriptions as comma-separated: message_created, message_updated, conversation_created, conversation_status_changed, conversation_updated, contact_created, contact_updated.
     If not specified, all events are subscribed."""
-    client = _get_client()
+    client = await _get_client()
     subs = None
     if subscriptions:
         subs = [s.strip() for s in subscriptions.split(",")]
