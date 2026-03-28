@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env', override=True)
 
 # Path to built frontend (populated in Docker)
 STATIC_DIR = ROOT_DIR / "static"
@@ -54,7 +54,7 @@ class ToolExecutePayload(BaseModel):
 
 
 # ── Import MCP server and client ──
-from mcp_tools import mcp as mcp_server_instance  # noqa: E402
+from mcp_tools import mcp as mcp_server_instance, set_runtime_config  # noqa: E402
 from chatwoot_client import ChatwootClient  # noqa: E402
 
 
@@ -68,10 +68,11 @@ def _get_chatwoot_config() -> dict:
 
 
 def _set_chatwoot_config(url: str, token: str, account_id: int):
-    """Set Chatwoot config in env (runtime)."""
+    """Set Chatwoot config in env (runtime) and sync to MCP tools."""
     os.environ["CHATWOOT_URL"] = url
     os.environ["CHATWOOT_API_TOKEN"] = token
     os.environ["CHATWOOT_ACCOUNT_ID"] = str(account_id)
+    set_runtime_config(url, token, account_id)
 
 
 # ── Configuration API ──
@@ -379,7 +380,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 async def startup():
     # Load config from MongoDB if available
     config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
-    if config:
+    if config and config.get("chatwoot_url"):
         _set_chatwoot_config(
             config.get("chatwoot_url", ""),
             config.get("api_token", ""),
@@ -387,10 +388,15 @@ async def startup():
         )
         logger.info(f"Loaded Chatwoot config from DB: {config.get('chatwoot_url', '')}")
     else:
-        # Check if env vars are already set (from .env file)
+        # Use env vars (from .env file or Docker env)
         url = os.environ.get("CHATWOOT_URL", "")
-        if url:
+        token = os.environ.get("CHATWOOT_API_TOKEN", "")
+        account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
+        if url and token:
+            set_runtime_config(url, token, account_id)
             logger.info(f"Using Chatwoot config from env: {url}")
+        else:
+            logger.warning("No Chatwoot config found. Configure via UI or set env vars.")
 
 
 @app.on_event("shutdown")

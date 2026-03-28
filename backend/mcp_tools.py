@@ -11,14 +11,28 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("chatwoot-mcp-server")
 
+# Shared runtime config — set by server.py startup and UI saves
+_runtime_config = {
+    "chatwoot_url": "",
+    "api_token": "",
+    "account_id": 0,
+}
+
+
+def set_runtime_config(url: str, token: str, account_id: int):
+    """Called by server.py when config is loaded or saved."""
+    _runtime_config["chatwoot_url"] = url
+    _runtime_config["api_token"] = token
+    _runtime_config["account_id"] = account_id
+
 
 def _get_client() -> ChatwootClient:
-    """Get a ChatwootClient using environment variables."""
-    base_url = os.environ.get("CHATWOOT_URL", "")
-    api_token = os.environ.get("CHATWOOT_API_TOKEN", "")
-    account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0"))
+    """Get a ChatwootClient from runtime config, falling back to env vars."""
+    base_url = _runtime_config["chatwoot_url"] or os.environ.get("CHATWOOT_URL", "")
+    api_token = _runtime_config["api_token"] or os.environ.get("CHATWOOT_API_TOKEN", "")
+    account_id = _runtime_config["account_id"] or int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0"))
     if not base_url or not api_token or not account_id:
-        raise ValueError("Chatwoot configuration missing. Set CHATWOOT_URL, CHATWOOT_API_TOKEN, CHATWOOT_ACCOUNT_ID.")
+        raise ValueError("Chatwoot configuration missing. Set CHATWOOT_URL, CHATWOOT_API_TOKEN, CHATWOOT_ACCOUNT_ID env vars or configure via the dashboard UI.")
     return ChatwootClient(base_url, api_token, account_id)
 
 
