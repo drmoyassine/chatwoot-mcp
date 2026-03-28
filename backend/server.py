@@ -60,14 +60,33 @@ from chatwoot_client import ChatwootClient  # noqa: E402
 
 def _get_chatwoot_config() -> dict:
     """Get current Chatwoot config from runtime config, falling back to env."""
-    url = _runtime_config.get("chatwoot_url") or os.environ.get("CHATWOOT_URL", "")
-    token = _runtime_config.get("api_token") or os.environ.get("CHATWOOT_API_TOKEN", "")
-    account_id = _runtime_config.get("account_id") or int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
+    url = _runtime_config.get("chatwoot_url") or os.environ.get("CHATWOOT_URL", "") or ""
+    token = _runtime_config.get("api_token") or os.environ.get("CHATWOOT_API_TOKEN", "") or ""
+    account_id = _runtime_config.get("account_id") or 0
+    if not account_id:
+        try:
+            account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
+        except (ValueError, TypeError):
+            account_id = 0
     return {
         "chatwoot_url": url,
         "api_token": token,
         "account_id": account_id,
     }
+
+
+async def _ensure_config_loaded():
+    """Load config from MongoDB if runtime config is still empty."""
+    if _runtime_config.get("chatwoot_url"):
+        return
+    config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
+    if config and config.get("chatwoot_url"):
+        _set_chatwoot_config(
+            config.get("chatwoot_url", ""),
+            config.get("api_token", ""),
+            config.get("account_id", 0),
+        )
+        logger.info(f"Lazy-loaded Chatwoot config from DB: {config.get('chatwoot_url', '')}")
 
 
 def _set_chatwoot_config(url: str, token: str, account_id: int):
@@ -81,6 +100,7 @@ def _set_chatwoot_config(url: str, token: str, account_id: int):
 # ── Configuration API ──
 @api_router.get("/config")
 async def get_config():
+    await _ensure_config_loaded()
     config = _get_chatwoot_config()
     return {
         "chatwoot_url": config["chatwoot_url"],
@@ -108,6 +128,7 @@ async def save_config(payload: ConfigPayload):
 
 @api_router.post("/config/test")
 async def test_connection():
+    await _ensure_config_loaded()
     config = _get_chatwoot_config()
     if not config["chatwoot_url"] or not config["api_token"] or not config["account_id"]:
         raise HTTPException(status_code=400, detail="Configuration incomplete")
@@ -321,6 +342,7 @@ async def handle_sse(request):
 # ── MCP Info Endpoint ──
 @api_router.get("/mcp/info")
 async def mcp_info():
+    await _ensure_config_loaded()
     config = _get_chatwoot_config()
     return {
         "server_name": "chatwoot-mcp-server",
