@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import httpx
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from chatwoot_client import ChatwootClient
@@ -555,4 +556,74 @@ async def get_account_reports(metric: str = "account",
     client = _get_client()
     result = await client.get_account_reports(metric=metric, report_type=report_type,
                                                since=since, until=until)
+    return _json(result)
+
+
+
+# ═══════════════════════════════════════════════════════
+# ADVANCED FILTER TOOLS
+# ═══════════════════════════════════════════════════════
+
+@mcp.tool()
+async def filter_conversations_advanced(filters_json: str, page: int = 1) -> str:
+    """Filter conversations using advanced criteria. Pass filters_json as a JSON string array of filter objects.
+    Each filter: {"attribute_key": "<key>", "filter_operator": "<op>", "values": [<vals>], "query_operator": "AND"|"OR"|null}
+    Available attribute_keys: status, assignee_id, inbox_id, team_id, labels, priority, browser_language, country_code, city, created_at, last_activity_at, referer, campaign_id, display_id, contact_identifier.
+    Available filter_operators: equal_to, not_equal_to, contains, does_not_contain, is_present, is_not_present, is_greater_than, is_less_than, days_before.
+    Status values: open, resolved, pending, snoozed.
+    Priority values: none, low, medium, high, urgent.
+    The last filter in the list should have query_operator as null.
+    Example: [{"attribute_key":"status","filter_operator":"equal_to","values":["open"],"query_operator":"AND"},{"attribute_key":"assignee_id","filter_operator":"equal_to","values":[1],"query_operator":null}]"""
+    client = _get_client()
+    try:
+        payload = json.loads(filters_json)
+    except json.JSONDecodeError as e:
+        return _json({"error": f"Invalid JSON: {str(e)}"})
+    result = await client.filter_conversations(payload=payload, page=page)
+    return _json(result)
+
+
+# ═══════════════════════════════════════════════════════
+# ATTACHMENT TOOLS
+# ═══════════════════════════════════════════════════════
+
+@mcp.tool()
+async def create_message_with_attachment(conversation_id: int, content: str,
+                                          file_url: str,
+                                          filename: Optional[str] = None,
+                                          message_type: str = "outgoing",
+                                          private: bool = False) -> str:
+    """Send a message with a file attachment in a conversation. Provide file_url pointing to the file to attach (http/https URL). Optionally specify filename. message_type: outgoing/incoming. Set private=true for internal notes."""
+    client = _get_client()
+    # Download the file
+    async with httpx.AsyncClient(timeout=30) as http:
+        file_resp = await http.get(file_url)
+        file_resp.raise_for_status()
+        file_data = file_resp.content
+        ct = file_resp.headers.get("content-type", "application/octet-stream")
+    if not filename:
+        filename = file_url.split("/")[-1].split("?")[0] or "attachment"
+    result = await client.create_message_with_attachment(
+        conversation_id=conversation_id, content=content,
+        file_data=file_data, filename=filename,
+        content_type_file=ct, message_type=message_type, private=private,
+    )
+    return _json(result)
+
+
+# ═══════════════════════════════════════════════════════
+# WEBHOOK LISTENER TOOLS
+# ═══════════════════════════════════════════════════════
+
+@mcp.tool()
+async def setup_webhook_listener(webhook_url: str,
+                                  subscriptions: Optional[str] = None) -> str:
+    """Register a webhook in Chatwoot to receive real-time events. Provide the URL that should receive webhook POST events.
+    Optional subscriptions as comma-separated: message_created, message_updated, conversation_created, conversation_status_changed, conversation_updated, contact_created, contact_updated.
+    If not specified, all events are subscribed."""
+    client = _get_client()
+    subs = None
+    if subscriptions:
+        subs = [s.strip() for s in subscriptions.split(",")]
+    result = await client.create_webhook(url=webhook_url, subscriptions=subs)
     return _json(result)

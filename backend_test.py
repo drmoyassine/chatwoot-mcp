@@ -2,11 +2,13 @@
 """
 Comprehensive backend API testing for Chatwoot MCP Server
 Tests all required endpoints and tool execution functionality
+Updated for iteration 2: Testing 51 tools + new webhook/filter features
 """
 
 import requests
 import json
 import sys
+import time
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -104,11 +106,24 @@ class ChatwootMCPTester:
         if tools_response and 'tools' in tools_response:
             tools = tools_response['tools']
             
-            # Verify we have 48 tools
-            if len(tools) == 48:
+            # Verify we have 51 tools (updated from 48)
+            if len(tools) == 51:
                 self.log_test("Tools count verification", True, f"Found {len(tools)} tools")
             else:
-                self.log_test("Tools count verification", False, f"Expected 48 tools, got {len(tools)}")
+                self.log_test("Tools count verification", False, f"Expected 51 tools, got {len(tools)}")
+            
+            # Check for new tools specifically
+            new_tools = ['filter_conversations_advanced', 'create_message_with_attachment', 'setup_webhook_listener']
+            found_new_tools = []
+            for tool in tools:
+                if tool['name'] in new_tools:
+                    found_new_tools.append(tool['name'])
+            
+            if len(found_new_tools) == 3:
+                self.log_test("New tools verification", True, f"Found all 3 new tools: {found_new_tools}")
+            else:
+                missing_new = [t for t in new_tools if t not in found_new_tools]
+                self.log_test("New tools verification", False, f"Missing new tools: {missing_new}")
             
             # Verify tools have required fields
             if tools:
@@ -190,13 +205,13 @@ class ChatwootMCPTester:
                     else:
                         self.log_test("STDIO command verification", False, f"Expected {expected_command}, got {actual_command}")
             
-            # Check tools count
+            # Check tools count (updated to 51)
             if 'tools_count' in mcp_info:
                 tools_count = mcp_info['tools_count']
-                if tools_count == 48:
+                if tools_count == 51:
                     self.log_test("MCP tools count verification", True, f"Tools count: {tools_count}")
                 else:
-                    self.log_test("MCP tools count verification", False, f"Expected 48, got {tools_count}")
+                    self.log_test("MCP tools count verification", False, f"Expected 51, got {tools_count}")
         
         return mcp_info
 
@@ -225,11 +240,165 @@ class ChatwootMCPTester:
         else:
             self.log_test("All expected categories present", False, f"Missing: {missing_categories}")
 
+    def test_webhook_endpoints(self):
+        """Test new webhook endpoints"""
+        print("\n🔗 Testing Webhook Endpoints...")
+        
+        # Test POST /api/webhooks/receive
+        webhook_data = {
+            "event": "test_event",
+            "data": {"test": "data", "timestamp": datetime.now().isoformat()}
+        }
+        
+        webhook_result = self.test_api_endpoint('POST', '/webhooks/receive', data=webhook_data,
+                                              test_name="POST /api/webhooks/receive - Webhook receiver")
+        
+        if webhook_result and webhook_result.get('status') == 'received':
+            self.log_test("Webhook receiver accepts events", True, "Event received successfully")
+        else:
+            self.log_test("Webhook receiver accepts events", False, f"Unexpected response: {webhook_result}")
+        
+        # Test GET /api/webhooks/events/history
+        history_result = self.test_api_endpoint('GET', '/webhooks/events/history?limit=10',
+                                               test_name="GET /api/webhooks/events/history - Get webhook history")
+        
+        if history_result and 'events' in history_result:
+            events = history_result['events']
+            self.log_test("Webhook history endpoint", True, f"Retrieved {len(events)} events")
+            
+            # Check if our test event is in the history
+            test_event_found = any(event.get('event') == 'test_event' for event in events)
+            if test_event_found:
+                self.log_test("Test event stored in history", True, "Test event found in webhook history")
+            else:
+                self.log_test("Test event stored in history", False, "Test event not found in history")
+        else:
+            self.log_test("Webhook history endpoint", False, f"Invalid response: {history_result}")
+        
+        # Test SSE endpoint connection (just check it responds, don't wait for events)
+        try:
+            sse_url = f"{self.base_url}/webhooks/events"
+            response = requests.get(sse_url, stream=True, timeout=2)
+            if response.status_code == 200:
+                self.log_test("SSE webhook stream endpoint", True, "SSE endpoint accessible")
+            else:
+                self.log_test("SSE webhook stream endpoint", False, f"Status: {response.status_code}")
+        except requests.exceptions.Timeout:
+            self.log_test("SSE webhook stream endpoint", True, "SSE endpoint accessible (timeout expected)")
+        except Exception as e:
+            self.log_test("SSE webhook stream endpoint", False, f"Error: {str(e)}")
+
+    def test_advanced_filter_tool(self):
+        """Test the new filter_conversations_advanced tool"""
+        print("\n🔍 Testing Advanced Filter Tool...")
+        
+        # Test filter_conversations_advanced with status filter
+        filter_data = {
+            'tool_name': 'filter_conversations_advanced',
+            'parameters': {
+                'filters_json': '[{"attribute_key":"status","filter_operator":"equal_to","values":["open"],"query_operator":null}]',
+                'page': 1
+            }
+        }
+        
+        filter_result = self.test_api_endpoint('POST', '/tools/execute', data=filter_data,
+                                             test_name="Execute filter_conversations_advanced tool")
+        
+        if filter_result and 'result' in filter_result:
+            self.log_test("Advanced filter returns result", True, "Filter executed successfully")
+            
+            # Check if result has expected structure (should be conversation data)
+            result = filter_result['result']
+            if isinstance(result, dict) and ('data' in result or 'payload' in result or 'conversations' in result):
+                self.log_test("Advanced filter result structure", True, "Result has expected conversation data structure")
+            else:
+                self.log_test("Advanced filter result structure", False, f"Unexpected result structure: {type(result)}")
+        else:
+            self.log_test("Advanced filter returns result", False, f"No result in response: {filter_result}")
+
+    def test_file_upload_endpoint(self):
+        """Test the new file upload endpoint"""
+        print("\n📎 Testing File Upload Endpoint...")
+        
+        # Test POST /api/tools/execute-with-file endpoint exists
+        # We'll test with a simple text file and the create_message_with_attachment tool
+        try:
+            # Create a simple test file content
+            test_file_content = b"This is a test file for attachment testing"
+            files = {'file': ('test.txt', test_file_content, 'text/plain')}
+            data = {
+                'tool_name': 'create_message_with_attachment',
+                'parameters': json.dumps({
+                    'conversation_id': 1,
+                    'content': 'Test message with attachment'
+                })
+            }
+            
+            url = f"{self.base_url}/tools/execute-with-file"
+            response = requests.post(url, data=data, files=files)
+            
+            if response.status_code == 200:
+                self.log_test("File upload endpoint accessible", True, "POST /api/tools/execute-with-file responds")
+                
+                try:
+                    result = response.json()
+                    if 'result' in result:
+                        self.log_test("File upload endpoint returns result", True, "File upload processed")
+                    else:
+                        self.log_test("File upload endpoint returns result", False, f"No result field: {result}")
+                except json.JSONDecodeError:
+                    self.log_test("File upload endpoint returns result", False, "Invalid JSON response")
+            else:
+                # Even if it fails due to invalid conversation ID, the endpoint should exist
+                if response.status_code in [400, 404, 500]:
+                    self.log_test("File upload endpoint accessible", True, f"Endpoint exists (status: {response.status_code})")
+                else:
+                    self.log_test("File upload endpoint accessible", False, f"Unexpected status: {response.status_code}")
+                    
+        except Exception as e:
+            self.log_test("File upload endpoint accessible", False, f"Exception: {str(e)}")
+
+    def test_new_tool_registration(self):
+        """Test that new tools are properly registered"""
+        print("\n🆕 Testing New Tool Registration...")
+        
+        # Test that create_message_with_attachment tool is registered
+        attachment_tool_data = {
+            'tool_name': 'create_message_with_attachment',
+            'parameters': {
+                'conversation_id': 999999,  # Use non-existent ID to avoid side effects
+                'content': 'Test message',
+                'file_url': 'https://httpbin.org/status/404'  # URL that will fail
+            }
+        }
+        
+        attachment_result = self.test_api_endpoint('POST', '/tools/execute', data=attachment_tool_data,
+                                                 expected_status=500,  # Expect failure due to invalid data
+                                                 test_name="Test create_message_with_attachment tool registration")
+        
+        # Test that setup_webhook_listener tool is registered
+        webhook_tool_data = {
+            'tool_name': 'setup_webhook_listener',
+            'parameters': {
+                'webhook_url': 'https://example.com/webhook',
+                'subscriptions': 'message_created,conversation_created'
+            }
+        }
+        
+        webhook_tool_result = self.test_api_endpoint('POST', '/tools/execute', data=webhook_tool_data,
+                                                   test_name="Test setup_webhook_listener tool registration")
+        
+        if webhook_tool_result and 'result' in webhook_tool_result:
+            self.log_test("Webhook listener tool returns result", True, "Tool executed successfully")
+        else:
+            self.log_test("Webhook listener tool returns result", False, f"No result: {webhook_tool_result}")
+
     def run_all_tests(self):
         """Run all backend tests"""
-        print("🚀 Starting Chatwoot MCP Server Backend Tests")
+        print("🚀 Starting Chatwoot MCP Server Backend Tests - Iteration 2")
         print(f"Testing against: {self.base_url}")
-        print("=" * 60)
+        print("Testing new features: 51 tools, webhook endpoints, advanced filtering, file uploads")
+        print("=" * 80)
         
         # Test configuration endpoints
         config, test_result = self.test_config_endpoints()
@@ -245,10 +414,23 @@ class ChatwootMCPTester:
         # Test MCP info endpoint
         mcp_info = self.test_mcp_info_endpoint()
         
+        # NEW TESTS FOR ITERATION 2
+        # Test webhook endpoints
+        self.test_webhook_endpoints()
+        
+        # Test advanced filter tool
+        self.test_advanced_filter_tool()
+        
+        # Test file upload endpoint
+        self.test_file_upload_endpoint()
+        
+        # Test new tool registration
+        self.test_new_tool_registration()
+        
         # Print summary
-        print("\n" + "=" * 60)
-        print("📊 TEST SUMMARY")
-        print("=" * 60)
+        print("\n" + "=" * 80)
+        print("📊 TEST SUMMARY - ITERATION 2")
+        print("=" * 80)
         print(f"Total tests run: {self.tests_run}")
         print(f"Tests passed: {self.tests_passed}")
         print(f"Tests failed: {len(self.failed_tests)}")

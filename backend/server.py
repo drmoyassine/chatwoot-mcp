@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,6 +9,8 @@ import os
 import json
 import logging
 import inspect
+import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
@@ -29,6 +32,9 @@ api_router = APIRouter(prefix="/api")
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# In-memory event subscribers for SSE streaming
+webhook_subscribers: list[asyncio.Queue] = []
 
 
 # ── Pydantic models ──
@@ -185,6 +191,105 @@ async def execute_tool(payload: ToolExecutePayload):
 
     try:
         result = await tool.fn(**payload.parameters)
+        return {"result": json.loads(result) if isinstance(result, str) else result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Webhook Receiver & Event Stream ──
+@api_router.post("/webhooks/receive")
+async def receive_webhook(request: Request):
+    """Endpoint for Chatwoot to POST webhook events to."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    event = {
+        "event": body.get("event", "unknown"),
+        "data": body,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Store in MongoDB (keep last 500 events)
+    await db.webhook_events.insert_one({**event, "_stored": True})
+    count = await db.webhook_events.count_documents({})
+    if count > 500:
+        oldest = await db.webhook_events.find().sort("received_at", 1).limit(count - 500).to_list(count - 500)
+        if oldest:
+            ids = [o["_id"] for o in oldest]
+            await db.webhook_events.delete_many({"_id": {"$in": ids}})
+    # Notify all SSE subscribers
+    for q in webhook_subscribers:
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+    logger.info(f"Webhook received: {event['event']}")
+    return {"status": "received"}
+
+
+@api_router.get("/webhooks/events")
+async def stream_webhook_events():
+    """SSE endpoint to stream webhook events to the frontend in real-time."""
+    queue = asyncio.Queue(maxsize=100)
+    webhook_subscribers.append(queue)
+
+    async def event_generator():
+        try:
+            while True:
+                event = await queue.get()
+                yield f"data: {json.dumps(event, default=str)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            webhook_subscribers.remove(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@api_router.get("/webhooks/events/history")
+async def get_webhook_history(limit: int = 50):
+    """Get recent webhook events from the database."""
+    events = await db.webhook_events.find({}, {"_id": 0, "_stored": 0}).sort("received_at", -1).limit(limit).to_list(limit)
+    return {"events": events}
+
+
+@api_router.post("/tools/execute-with-file")
+async def execute_tool_with_file(
+    tool_name: str = Form(...),
+    parameters: str = Form("{}"),
+    file: Optional[UploadFile] = File(None),
+):
+    """Execute an MCP tool with optional file upload (for attachment tools)."""
+    config = _get_chatwoot_config()
+    if not config["chatwoot_url"] or not config["api_token"]:
+        raise HTTPException(status_code=400, detail="Chatwoot not configured")
+
+    params = json.loads(parameters)
+
+    # If it's the attachment tool and we have a file, handle it specially
+    if tool_name == "create_message_with_attachment" and file:
+        from chatwoot_client import ChatwootClient
+        c = ChatwootClient(config["chatwoot_url"], config["api_token"], config["account_id"])
+        file_data = await file.read()
+        result = await c.create_message_with_attachment(
+            conversation_id=int(params.get("conversation_id", 0)),
+            content=params.get("content", ""),
+            file_data=file_data,
+            filename=file.filename or "attachment",
+            content_type_file=file.content_type or "application/octet-stream",
+            message_type=params.get("message_type", "outgoing"),
+            private=params.get("private", False),
+        )
+        return {"result": result}
+
+    # Regular tool execution
+    tool_manager = mcp_server_instance._tool_manager
+    tool = tool_manager._tools.get(tool_name)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+    try:
+        result = await tool.fn(**params)
         return {"result": json.loads(result) if isinstance(result, str) else result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

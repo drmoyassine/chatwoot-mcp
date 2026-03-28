@@ -1,0 +1,30 @@
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+
+  chatwoot-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      CHATWOOT_URL: "${CHATWOOT_URL}"
+      CHATWOOT_API_TOKEN: "${CHATWOOT_API_TOKEN}"
+      CHATWOOT_ACCOUNT_ID: "${CHATWOOT_ACCOUNT_ID}"
+      MONGO_URL: "mongodb://mongodb:27017"
+      DB_NAME: "chatwoot_mcp"
+      CORS_ORIGINS: "*"
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo_data:

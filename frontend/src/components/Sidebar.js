@@ -32,6 +32,9 @@ export function Sidebar({
   mcpInfo,
   onSaveConfig,
   onTestConnection,
+  activeTab,
+  onTabChange,
+  tabs,
 }) {
   const [isConfigOpen, setIsConfigOpen] = useState(true);
   const [isMcpOpen, setIsMcpOpen] = useState(true);
@@ -279,6 +282,31 @@ export function Sidebar({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {/* Navigation Tabs */}
+      {tabs && (
+        <div className="border-b border-[#E5E5E5]">
+          <div className="px-4 py-2">
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#666] block mb-2 px-2">
+              Navigation
+            </span>
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors duration-150 flex items-center gap-2 ${
+                  activeTab === tab.id
+                    ? "bg-[#002FA7]/5 text-[#002FA7] border-l-2 border-l-[#002FA7] font-semibold"
+                    : "text-[#666] hover:text-[#0A0A0A] hover:bg-[#EBEBEB]"
+                }`}
+                data-testid={`nav-tab-${tab.id}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <div className="mt-auto p-4 border-t border-[#E5E5E5]">

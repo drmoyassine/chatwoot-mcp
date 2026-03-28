@@ -23,6 +23,16 @@ class ChatwootClient:
                 return {"status": "success"}
             return resp.json()
 
+    async def _multipart_request(self, method: str, path: str, data: dict, files: list) -> dict:
+        """Send a multipart/form-data request (for file attachments)."""
+        auth_headers = {"api_access_token": self.api_token}
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.request(
+                method, self._url(path), headers=auth_headers, data=data, files=files
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     # ── Account ──
     async def get_account(self) -> dict:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -179,6 +189,22 @@ class ChatwootClient:
         }
         return await self._request("POST", f"/conversations/{conversation_id}/messages",
                                    json=payload)
+
+    async def create_message_with_attachment(self, conversation_id: int, content: str,
+                                              file_data: bytes, filename: str,
+                                              content_type_file: str = "application/octet-stream",
+                                              message_type: str = "outgoing",
+                                              private: bool = False) -> dict:
+        """Create a message with a file attachment using multipart/form-data."""
+        data = {
+            "content": content,
+            "message_type": message_type,
+            "private": str(private).lower(),
+        }
+        files = [("attachments[]", (filename, file_data, content_type_file))]
+        return await self._multipart_request(
+            "POST", f"/conversations/{conversation_id}/messages", data=data, files=files
+        )
 
     async def delete_message(self, conversation_id: int, message_id: int) -> dict:
         return await self._request("DELETE", f"/conversations/{conversation_id}/messages/{message_id}")

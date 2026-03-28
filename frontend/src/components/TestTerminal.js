@@ -53,7 +53,7 @@ function JsonOutput({ data }) {
   );
 }
 
-export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
+export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, connectionStatus }) {
   const [params, setParams] = useState({});
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -61,7 +61,9 @@ export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
   const [elapsed, setElapsed] = useState(null);
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
   const outputRef = useRef(null);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     if (selectedTool) {
@@ -77,8 +79,12 @@ export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
       setResult(null);
       setError(null);
       setElapsed(null);
+      setSelectedFile(null);
+      if (fileRef.current) fileRef.current.value = "";
     }
   }, [selectedTool]);
+
+  const isAttachmentTool = selectedTool?.name === "create_message_with_attachment";
 
   const handleExecute = async () => {
     if (!selectedTool) return;
@@ -90,6 +96,8 @@ export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
       const cleanParams = {};
       for (const [key, val] of Object.entries(params)) {
         if (val === "" || val === undefined) continue;
+        // Skip file_url param if we have a direct file upload
+        if (isAttachmentTool && key === "file_url" && selectedFile) continue;
         const paramDef = selectedTool.parameters.find((p) => p.name === key);
         if (paramDef) {
           if (paramDef.type === "int" || paramDef.type === "integer") {
@@ -109,7 +117,13 @@ export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
           cleanParams[key] = val;
         }
       }
-      const resp = await onExecute(selectedTool.name, cleanParams);
+
+      let resp;
+      if (isAttachmentTool && selectedFile && onExecuteWithFile) {
+        resp = await onExecuteWithFile(selectedTool.name, cleanParams, selectedFile);
+      } else {
+        resp = await onExecute(selectedTool.name, cleanParams);
+      }
       const duration = Math.round(performance.now() - start);
       setResult(resp.result);
       setElapsed(duration);
@@ -235,6 +249,32 @@ export function TestTerminal({ selectedTool, onExecute, connectionStatus }) {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* File Upload for Attachment tools */}
+            {isAttachmentTool && (
+              <div className="px-4 py-2 border-b border-[#222]">
+                <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-2">
+                  File Attachment
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    onChange={(e) => setSelectedFile(e.target.files[0] || null)}
+                    className="flex-1 font-mono text-xs text-[#E5E5E5] file:mr-2 file:py-1 file:px-3 file:border file:border-[#333] file:text-[10px] file:font-mono file:bg-[#151515] file:text-[#00E559] file:cursor-pointer hover:file:bg-[#222]"
+                    data-testid="file-upload-input"
+                  />
+                </div>
+                {selectedFile && (
+                  <p className="font-mono text-[10px] text-[#00E559] mt-1">
+                    {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)}KB)
+                  </p>
+                )}
+                <p className="font-mono text-[10px] text-[#444] mt-1">
+                  Upload a file directly, or use file_url param for remote files
+                </p>
               </div>
             )}
 
