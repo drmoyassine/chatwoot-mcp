@@ -22,20 +22,25 @@ Build a complete MCP (Model Context Protocol) server for Chatwoot Application AP
 - [x] Frontend live testing terminal with JSON output
 
 ## What's Been Implemented (2026-03-28)
-- **48 MCP Tools** across 12 categories:
+- **51 MCP Tools** across 12+ categories:
   - Account (get, update)
   - Agents (list, add, update, remove)
   - Contacts (list, create, get, update, delete, search, get conversations)
   - Conversations (list, create, get, filter, counts, toggle status, assign, labels)
-  - Messages (get, create, delete)
+  - Messages (get, create, delete, **create with attachment**)
   - Inboxes (list, get, create, update)
   - Teams (list, create, get, update, delete)
   - Labels (list, create, update, delete)
   - Canned Responses (list, create, update, delete)
   - Custom Attributes (list, create)
-  - Webhooks (list, create, update, delete)
+  - Webhooks (list, create, update, delete, **setup listener**)
   - Reports (get)
-- **Frontend Dashboard** with Swiss/High-Contrast design, Control Room layout
+  - **Advanced Filters** (filter_conversations_advanced)
+- **Frontend Dashboard** with 3 tabs: Tools, Filters, Webhooks
+- **Conversation Filter Builder** - Visual UI with attribute/operator/value dropdowns, AND/OR logic, payload preview
+- **File Attachment Support** - Upload files via URL or direct upload in messages
+- **Webhook Event Streaming** - Real-time SSE stream + MongoDB persistence + LIVE feed
+- **Dockerfile + docker-compose.yml** - Production deployment ready
 - **SSE Transport** at /api/mcp/sse
 - **stdio Transport** via `python mcp_stdio.py`
 - **Config Persistence** in MongoDB
