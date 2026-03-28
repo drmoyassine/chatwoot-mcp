@@ -98,7 +98,7 @@ TOOL_CATEGORIES = {
 
 def _classify_tool(name: str) -> str:
     """Determine category from tool name."""
-    if name.startswith(("list_tools", "describe_tool", "list_categories", "search_tools", "get_server", "check_connection")):
+    if name.startswith(("start_here", "list_tools", "describe_tool", "list_categories", "search_tools", "get_server", "check_connection")):
         return "discovery"
     for cat in ["canned_response", "custom_attribute", "webhook", "report", "agent", "contact",
                  "conversation", "message", "inbox", "team", "label", "account"]:
@@ -157,63 +157,61 @@ def _get_all_tools_metadata() -> list:
 # ═══════════════════════════════════════════════════════
 
 @mcp.tool()
-async def list_tools(category: Optional[str] = None) -> str:
-    """List all available tools on this MCP server. Optionally filter by category. Returns tool name, description, and parameter summary for each tool.
-    Available categories: account, agents, contacts, conversations, messages, inboxes, teams, labels, canned_responses, custom_attributes, webhooks, reports, discovery.
-    Call with no arguments to see all tools. Use describe_tool for full parameter details."""
+async def start_here() -> str:
+    """START HERE. Call this first to understand what this MCP server can do. Returns a concise overview of the server, all categories, tool counts, and connection status."""
+    config_set = bool(_runtime_config["chatwoot_url"] or os.environ.get("CHATWOOT_URL", ""))
     all_tools = _get_all_tools_metadata()
+    cats = {}
+    for t in all_tools:
+        c = t["category"]
+        if c not in cats:
+            cats[c] = {"description": TOOL_CATEGORIES.get(c, ""), "tool_count": 0, "tools": []}
+        cats[c]["tool_count"] += 1
+        cats[c]["tools"].append(t["name"])
+    return _json({
+        "server": "Chatwoot MCP Server",
+        "description": "Complete Chatwoot API coverage via MCP. Manage conversations, contacts, messages, agents, inboxes, teams, labels, and more.",
+        "chatwoot_connected": config_set,
+        "total_tools": len(all_tools),
+        "categories": {name: {"description": info["description"], "tool_count": info["tool_count"], "tools": info["tools"]} for name, info in sorted(cats.items())},
+        "usage": {
+            "browse": "list_tools(category='conversations') — list tools in a category with full parameter schemas",
+            "lookup": "list_tools(tool_name='create_message') — get full schema for a specific tool",
+            "search": "search_tools(query='assign') — find tools by keyword",
+            "verify": "check_connection() — test Chatwoot credentials",
+        },
+    })
+
+
+@mcp.tool()
+async def list_tools(category: Optional[str] = None, tool_name: Optional[str] = None) -> str:
+    """List and inspect MCP tools. Use ONE of the optional filters:
+    - category: filter by category (agents, contacts, conversations, messages, inboxes, teams, labels, canned_responses, custom_attributes, webhooks, reports, account, discovery)
+    - tool_name: get full schema for a specific tool (name, description, parameters with types/defaults/required)
+    Call with no arguments to list all tools."""
+    all_tools = _get_all_tools_metadata()
+
+    # Single tool lookup
+    if tool_name:
+        tool = next((t for t in all_tools if t["name"] == tool_name), None)
+        if not tool:
+            suggestions = [t["name"] for t in all_tools if tool_name.lower() in t["name"].lower()]
+            return _json({"error": f"Tool '{tool_name}' not found", "did_you_mean": suggestions[:5]})
+        return _json(tool)
+
+    # Category filter
     if category:
         cat = category.lower().strip()
         all_tools = [t for t in all_tools if t["category"] == cat]
         if not all_tools:
             return _json({"error": f"No tools in category '{category}'", "available_categories": list(TOOL_CATEGORIES.keys())})
 
-    result = []
-    for t in all_tools:
-        result.append({
-            "name": t["name"],
-            "category": t["category"],
-            "description": t["description"],
-            "parameters": t["parameters"],
-        })
-    return _json({"tool_count": len(result), "tools": result})
-
-
-@mcp.tool()
-async def describe_tool(tool_name: str) -> str:
-    """Get the full schema and documentation for a specific tool. Returns complete parameter definitions with types, defaults, and whether they're required. Use this before calling an unfamiliar tool."""
-    all_tools = _get_all_tools_metadata()
-    tool = next((t for t in all_tools if t["name"] == tool_name), None)
-    if not tool:
-        suggestions = [t["name"] for t in all_tools if tool_name.lower() in t["name"].lower()]
-        return _json({"error": f"Tool '{tool_name}' not found", "did_you_mean": suggestions[:5]})
-    return _json(tool)
-
-
-@mcp.tool()
-async def list_categories() -> str:
-    """List all tool categories with descriptions and tool counts. Use this to understand what this server can do at a high level before diving into specific tools."""
-    all_tools = _get_all_tools_metadata()
-    cats = {}
-    for t in all_tools:
-        c = t["category"]
-        if c not in cats:
-            cats[c] = {"description": TOOL_CATEGORIES.get(c, ""), "tools": []}
-        cats[c]["tools"].append(t["name"])
-    result = []
-    for name in sorted(cats):
-        result.append({
-            "category": name,
-            "description": cats[name]["description"],
-            "tool_count": len(cats[name]["tools"]),
-            "tools": cats[name]["tools"],
-        })
-    return _json({"total_categories": len(result), "total_tools": len(all_tools), "categories": result})
+    return _json({"tool_count": len(all_tools), "tools": all_tools})
 
 
 @mcp.tool()
 async def search_tools(query: str) -> str:
-    """Search for tools by keyword. Searches tool names and descriptions. Use this when you know what you want to do but aren't sure which tool to use. Example queries: 'assign', 'search contact', 'webhook', 'status'."""
+    """Search for tools by keyword. Searches tool names and descriptions. Example queries: 'assign', 'search contact', 'webhook', 'status'."""
     all_tools = _get_all_tools_metadata()
     q = query.lower()
     matches = []
@@ -232,34 +230,8 @@ async def search_tools(query: str) -> str:
 
 
 @mcp.tool()
-async def get_server_info() -> str:
-    """Get MCP server status, version, configuration state, and available transports. Use this as a health check or to understand the server setup."""
-    config_set = bool(
-        _runtime_config["chatwoot_url"]
-        or os.environ.get("CHATWOOT_URL", "")
-    )
-    all_tools = _get_all_tools_metadata()
-    cats = {}
-    for t in all_tools:
-        cats[t["category"]] = cats.get(t["category"], 0) + 1
-    return _json({
-        "server": "chatwoot-mcp-server",
-        "protocol": "Model Context Protocol (MCP)",
-        "chatwoot_configured": config_set,
-        "chatwoot_url": _runtime_config.get("chatwoot_url", "")[:30] + "..." if _runtime_config.get("chatwoot_url") else "not set",
-        "total_tools": len(all_tools),
-        "categories": cats,
-        "transports": {
-            "sse": "Available at /api/mcp/sse",
-            "stdio": "Run: python mcp_stdio.py",
-        },
-        "quickstart": "Call list_categories to see what's available, then list_tools with a category to explore.",
-    })
-
-
-@mcp.tool()
 async def check_connection() -> str:
-    """Test the connection to Chatwoot and return account details. Use this to verify credentials are working before running other tools."""
+    """Test the connection to Chatwoot and return account details. Use this to verify credentials are working."""
     try:
         client = await _get_client()
         result = await client.get_account()
