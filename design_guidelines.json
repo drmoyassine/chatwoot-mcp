@@ -1,0 +1,119 @@
+{
+  "theme": "light",
+  "archetype": "4",
+  "archetype_name": "Swiss & High-Contrast",
+  "description": "A structural, function-first, blueprint-inspired aesthetic for a developer-centric MCP Server Dashboard. It leans heavily into raw aesthetics, monospaced typography for data, and stark contrast to reinforce authority and clarity. A 'Terminal/Retro-Futurism' micro-theme is applied specifically to the live testing/JSON response areas to create a 'Control Room' feel.",
+  "colors": {
+    "background": "#FFFFFF",
+    "surface_primary": "#FFFFFF",
+    "surface_secondary": "#F5F5F5",
+    "surface_terminal": "#0A0A0A",
+    "border_subtle": "#E5E5E5",
+    "border_strong": "#0A0A0A",
+    "primary": "#002FA7",
+    "primary_hover": "#001B66",
+    "text_primary": "#0A0A0A",
+    "text_secondary": "#666666",
+    "text_terminal": "#00E559",
+    "status": {
+      "success": "#00E559",
+      "error": "#FF2A2A",
+      "warning": "#FFCC00",
+      "offline": "#999999"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Chivo, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
+      "code": "JetBrains Mono, monospace"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter text-[#0A0A0A]",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-[#0A0A0A]",
+      "h3": "text-xl sm:text-2xl font-semibold tracking-tight text-[#0A0A0A]",
+      "h4": "text-lg font-medium text-[#0A0A0A]",
+      "body": "text-base font-normal leading-relaxed text-[#0A0A0A]",
+      "small": "text-sm text-[#666666]",
+      "overline": "text-xs font-bold uppercase tracking-[0.2em] text-[#666666]",
+      "code": "font-mono text-sm leading-relaxed"
+    }
+  },
+  "layout_and_spacing": {
+    "grid_strategy": "Control Room",
+    "container": "w-full max-w-full h-screen overflow-hidden flex flex-col md:flex-row bg-[#FFFFFF]",
+    "panels": {
+      "sidebar": "w-full md:w-80 flex-shrink-0 border-r border-[#E5E5E5] bg-[#F5F5F5] overflow-y-auto",
+      "main": "flex-1 flex flex-col overflow-hidden border-r border-[#E5E5E5] bg-[#FFFFFF]",
+      "terminal": "w-full md:w-[400px] lg:w-[500px] flex-shrink-0 bg-[#0A0A0A] text-[#00E559] flex flex-col overflow-hidden"
+    },
+    "spacing_scale": "dense",
+    "padding_rules": {
+      "section": "p-6 sm:p-8",
+      "card_internal": "p-4 sm:p-6",
+      "dense_row": "py-2 px-4"
+    },
+    "alignment": "Strict left-alignment for all inputs, labels, and JSON outputs. Center alignment only for empty states."
+  },
+  "surfaces_and_borders": {
+    "global_radius": "rounded-none",
+    "cards": "border border-[#E5E5E5] bg-[#FFFFFF] shadow-none",
+    "inputs": "border border-[#E5E5E5] bg-[#FFFFFF] focus:border-[#002FA7] focus:ring-1 focus:ring-[#002FA7] transition-all",
+    "terminal_surface": "border-l border-[#0A0A0A] shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]",
+    "dividers": "border-b border-[#E5E5E5]",
+    "glassmorphism": "Not recommended for this archetype. Use solid panels."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#002FA7] text-white font-medium px-4 py-2 hover:bg-[#001B66] transition-colors rounded-none",
+      "secondary": "bg-transparent border border-[#0A0A0A] text-[#0A0A0A] font-medium px-4 py-2 hover:bg-[#F5F5F5] transition-colors rounded-none",
+      "destructive": "bg-[#FF2A2A] text-white font-medium px-4 py-2 hover:bg-[#CC0000] transition-colors rounded-none"
+    },
+    "badges": {
+      "active": "bg-[#00E559]/10 text-[#00E559] border border-[#00E559]/20 px-2 py-0.5 text-xs font-mono uppercase",
+      "inactive": "bg-[#999999]/10 text-[#666666] border border-[#999999]/20 px-2 py-0.5 text-xs font-mono uppercase"
+    },
+    "forms": {
+      "label": "text-sm font-medium text-[#0A0A0A] mb-1.5 block",
+      "input": "w-full px-3 py-2 border border-[#E5E5E5] bg-white text-[#0A0A0A] font-mono text-sm focus:outline-none focus:border-[#002FA7] rounded-none placeholder:text-[#999999]",
+      "select": "w-full px-3 py-2 border border-[#E5E5E5] bg-white text-[#0A0A0A] text-sm focus:outline-none focus:border-[#002FA7] rounded-none"
+    },
+    "tables_lists": {
+      "row": "border-b border-[#E5E5E5] hover:bg-[#F5F5F5] transition-colors",
+      "header": "text-xs font-bold uppercase tracking-wider text-[#666666] bg-[#F5F5F5] py-3 px-4 text-left"
+    }
+  },
+  "motion": {
+    "hover_states": "Crisp, immediate color swaps. No slow fades. Use transition-colors duration-150.",
+    "focus_states": "High-contrast ring. focus:ring-2 focus:ring-[#002FA7] focus:ring-offset-1 focus:outline-none",
+    "loading": "ASCII-style loaders or stark monochrome progress bars. No soft spinning circles."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Stroke-based, consistent 1.5px or 2px weight. Avoid filled icons."
+  },
+  "visual_enhancers": {
+    "background_pattern": "CSS Data Grid: Use a subtle 20px by 20px CSS grid background on empty states. e.g. background-image: linear-gradient(to right, #e5e5e5 1px, transparent 1px), linear-gradient(to bottom, #e5e5e5 1px, transparent 1px);",
+    "terminal_scanline": "For the JSON testing panel, an optional CSS scanline overlay can be added using a repeating linear gradient with 2-3% opacity to enhance the Retro-Futurism feel."
+  },
+  "data_testid_rules": "All interactive elements, buttons, inputs, tool items, and JSON output panels MUST have a data-testid attribute formatted as kebab-case and role-based (e.g., data-testid='config-save-button', data-testid='tool-item-get-contacts', data-testid='live-test-execute-button').",
+  "media_urls": {
+    "images": [
+      {
+        "category": "background_texture",
+        "url": "https://images.unsplash.com/photo-1759210479316-7b6ea0fc7856?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHRlY2huaWNhbCUyMGdyaWQlMjBwYXR0ZXJufGVufDB8fHx8MTc3NDY5OTI5MXww&ixlib=rb-4.1.0&q=85",
+        "description": "Dark abstract background with faint grid lines. Can be used as a subtle overlay for the dark terminal panel if needed, though pure CSS is preferred."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Install fonts via Google Fonts in index.css: Chivo, IBM Plex Sans, and JetBrains Mono.",
+    "Install required icons: lucide-react (already in package.json).",
+    "Use a strictly 3-column layout (or 2-column with a collapsible right panel) to fit the Control Room grid archetype. Left: Config & Status. Center: Tool Explorer. Right: Live Testing Terminal.",
+    "Do NOT use generic Vercel/Stripe soft shadows or rounded corners. Enforce rounded-none everywhere. Borders should be sharp 1px solid lines.",
+    "The Live Testing Terminal MUST have a dark theme (Void Black #0A0A0A) contrasting sharply with the rest of the light UI. Use JetBrains Mono for the JSON output.",
+    "Form inputs should also use a monospace font to emphasize the 'developer tool' aesthetic.",
+    "Ensure the layout is completely fluid and uses h-screen to feel like a native desktop app.",
+    "DO NOT use the Card component for the main layout frames. Use raw div with explicit border-r / border-b styling to create a flush, seamless grid."
+  ]
+}
