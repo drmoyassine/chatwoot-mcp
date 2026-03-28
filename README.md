@@ -2,17 +2,19 @@
 
 A complete [Model Context Protocol](https://modelcontextprotocol.io/) server that wraps **all** Chatwoot Application APIs into 51 MCP tools. Connect it to n8n, Claude Desktop, Cursor, or any MCP-compatible client to manage customer conversations, contacts, agents, and more through natural language.
 
+Includes a built-in **dashboard UI** for configuration, tool exploration, and live testing.
+
 ---
 
 ## Features
 
 - **51 MCP tools** covering every Chatwoot Application API endpoint
 - **Dual transport** — SSE (HTTP, for n8n / remote clients) and stdio (for local CLI / Claude Desktop)
+- **Dashboard UI** — configure credentials, browse all tools, and live-test from the browser
 - **Conversation Filter Builder** — advanced multi-condition filtering with AND/OR logic
 - **File attachments** — send files in messages via URL or direct upload
 - **Webhook event streaming** — receive Chatwoot events in real-time via SSE
-- **Dashboard UI** — configure, explore tools, and live-test from the browser
-- **Docker-ready** — single `docker compose up` to deploy
+- **Docker-ready** — single `docker compose up` to deploy (API + UI + MongoDB)
 
 ---
 
@@ -38,20 +40,41 @@ CHATWOOT_ACCOUNT_ID=1
 docker compose up --build -d
 ```
 
-The server starts on **port 8001**. The MCP SSE endpoint is at:
+This starts:
+- **MCP Server + Dashboard UI** on `http://localhost:8001`
+- **MongoDB** on port 27017
 
-```
-http://localhost:8001/api/mcp/sse
-```
+Open `http://localhost:8001` in your browser to access the dashboard.
 
 ### 3. Run without Docker
 
 ```bash
+# Backend
 cd backend
 pip install -r requirements.docker.txt
 cp ../.env.example .env   # then edit with your credentials
 uvicorn server:app --host 0.0.0.0 --port 8001
+
+# Frontend (separate terminal, for development)
+cd frontend
+yarn install
+REACT_APP_BACKEND_URL=http://localhost:8001 yarn start
 ```
+
+---
+
+## Accessing the Dashboard UI
+
+| Deployment | URL |
+|------------|-----|
+| Docker Compose | `http://localhost:8001` |
+| Without Docker (dev) | `http://localhost:3000` (React dev server) |
+
+The dashboard has three tabs:
+
+- **Tools** — Browse all 51 MCP tools by category, search, select and execute with the live testing terminal
+- **Filters** — Visual conversation filter builder with attribute/operator/value dropdowns and AND/OR logic
+- **Webhooks** — Real-time feed of incoming Chatwoot webhook events
 
 ---
 
@@ -257,16 +280,27 @@ To receive real-time Chatwoot events:
 ## Project Structure
 
 ```
-├── Dockerfile                        # Production Docker image
+├── Dockerfile                        # Multi-stage build (Node + Python)
 ├── docker-compose.yml                # Docker Compose with MongoDB
+├── .dockerignore                     # Docker build exclusions
 ├── .env.example                      # Environment variable template
-└── backend/
-    ├── server.py                     # FastAPI app + REST API + MCP SSE mount
-    ├── mcp_tools.py                  # 51 MCP tool definitions
-    ├── mcp_stdio.py                  # Standalone stdio transport entry point
-    ├── chatwoot_client.py            # Async HTTP client for Chatwoot APIs
-    ├── requirements.docker.txt       # Python dependencies (Docker)
-    └── .env                          # Local environment variables
+├── backend/
+│   ├── server.py                     # FastAPI app + REST API + MCP SSE + static file serving
+│   ├── mcp_tools.py                  # 51 MCP tool definitions
+│   ├── mcp_stdio.py                  # Standalone stdio transport entry point
+│   ├── chatwoot_client.py            # Async HTTP client for Chatwoot APIs
+│   ├── requirements.docker.txt       # Python dependencies (Docker)
+│   └── .env                          # Local environment variables
+└── frontend/
+    ├── package.json                  # React dependencies
+    └── src/
+        ├── App.js                    # Main app with tab routing
+        └── components/
+            ├── Sidebar.js            # Config panel + MCP status + navigation
+            ├── ToolExplorer.js       # Tool browser with categories and search
+            ├── TestTerminal.js       # Live testing terminal (dark theme)
+            ├── FilterBuilder.js      # Visual conversation filter builder
+            └── WebhookEvents.js      # Real-time webhook event feed
 ```
 
 ---

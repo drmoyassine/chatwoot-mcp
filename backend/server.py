@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -17,6 +18,9 @@ from typing import Optional
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Path to built frontend (populated in Docker)
+STATIC_DIR = ROOT_DIR / "static"
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -351,6 +355,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Serve built frontend (Docker deployment) ──
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Serve static assets (JS, CSS, images)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="frontend-assets")
+
+    # SPA catch-all: serve index.html for any non-API route
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Don't intercept API or MCP routes
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        # Serve actual static files if they exist (favicon, manifest, etc.)
+        file_path = STATIC_DIR / full_path
+        if full_path and file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        # Everything else → index.html (SPA routing)
+        return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 @app.on_event("startup")
