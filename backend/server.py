@@ -54,16 +54,19 @@ class ToolExecutePayload(BaseModel):
 
 
 # ── Import MCP server and client ──
-from mcp_tools import mcp as mcp_server_instance, set_runtime_config  # noqa: E402
+from mcp_tools import mcp as mcp_server_instance, set_runtime_config, _runtime_config  # noqa: E402
 from chatwoot_client import ChatwootClient  # noqa: E402
 
 
 def _get_chatwoot_config() -> dict:
-    """Get current Chatwoot config from env."""
+    """Get current Chatwoot config from runtime config, falling back to env."""
+    url = _runtime_config.get("chatwoot_url") or os.environ.get("CHATWOOT_URL", "")
+    token = _runtime_config.get("api_token") or os.environ.get("CHATWOOT_API_TOKEN", "")
+    account_id = _runtime_config.get("account_id") or int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
     return {
-        "chatwoot_url": os.environ.get("CHATWOOT_URL", ""),
-        "api_token": os.environ.get("CHATWOOT_API_TOKEN", ""),
-        "account_id": int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0")),
+        "chatwoot_url": url,
+        "api_token": token,
+        "account_id": account_id,
     }
 
 

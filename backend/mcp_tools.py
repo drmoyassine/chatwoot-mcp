@@ -170,14 +170,11 @@ async def list_tools(category: Optional[str] = None) -> str:
 
     result = []
     for t in all_tools:
-        param_summary = ", ".join(
-            f"{p['name']}{'*' if p['required'] else ''}:{p['type']}" for p in t["parameters"]
-        )
         result.append({
             "name": t["name"],
             "category": t["category"],
-            "description": t["description"][:200],
-            "parameters": param_summary or "(none)",
+            "description": t["description"],
+            "parameters": t["parameters"],
         })
     return _json({"tool_count": len(result), "tools": result})
 
