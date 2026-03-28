@@ -35,6 +35,8 @@ export function Sidebar({
   activeTab,
   onTabChange,
   tabs,
+  outputFormat,
+  onOutputFormatChange,
 }) {
   const [isConfigOpen, setIsConfigOpen] = useState(true);
   const [isMcpOpen, setIsMcpOpen] = useState(true);
@@ -278,6 +280,36 @@ export function Sidebar({
               <span className="font-mono text-sm font-bold text-[#002FA7]" data-testid="mcp-tools-count">
                 {mcpInfo?.tools_count || 0}
               </span>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-[#666] mb-1.5 block">DISCOVERY OUTPUT FORMAT</label>
+              <div className="flex border border-[#E5E5E5] bg-white" data-testid="output-format-toggle">
+                <button
+                  onClick={() => onOutputFormatChange && onOutputFormatChange("json")}
+                  className={`flex-1 font-mono text-xs py-1.5 px-3 transition-colors ${
+                    outputFormat === "json"
+                      ? "bg-[#002FA7] text-white"
+                      : "text-[#666] hover:bg-[#F0F0F0]"
+                  }`}
+                  data-testid="output-format-json"
+                >
+                  JSON
+                </button>
+                <button
+                  onClick={() => onOutputFormatChange && onOutputFormatChange("toon")}
+                  className={`flex-1 font-mono text-xs py-1.5 px-3 transition-colors border-l border-[#E5E5E5] ${
+                    outputFormat === "toon"
+                      ? "bg-[#002FA7] text-white"
+                      : "text-[#666] hover:bg-[#F0F0F0]"
+                  }`}
+                  data-testid="output-format-toon"
+                >
+                  TOON
+                </button>
+              </div>
+              <p className="text-[10px] text-[#999] mt-1">
+                {outputFormat === "toon" ? "Compact format — ~40% fewer tokens for discovery tools" : "Standard JSON format for discovery tool outputs"}
+              </p>
             </div>
           </div>
         </CollapsibleContent>

@@ -16,14 +16,21 @@ _runtime_config = {
     "chatwoot_url": "",
     "api_token": "",
     "account_id": 0,
+    "output_format": "json",
 }
 
 
-def set_runtime_config(url: str, token: str, account_id: int):
+def set_runtime_config(url: str, token: str, account_id: int, output_format: str = "json"):
     """Called by server.py when config is loaded or saved."""
     _runtime_config["chatwoot_url"] = url
     _runtime_config["api_token"] = token
     _runtime_config["account_id"] = account_id
+    _runtime_config["output_format"] = output_format
+
+
+def set_output_format(fmt: str):
+    """Set the output format for discovery tools."""
+    _runtime_config["output_format"] = fmt
 
 
 async def _load_config_from_db():
@@ -74,6 +81,17 @@ async def _get_client() -> ChatwootClient:
 
 def _json(data) -> str:
     return json.dumps(data, indent=2, default=str)
+
+
+def _format_output(data, force_json=False) -> str:
+    """Format output as JSON or TOON based on runtime config."""
+    if force_json or _runtime_config.get("output_format", "json") == "json":
+        return json.dumps(data, indent=2, default=str)
+    try:
+        from toon import encode
+        return encode(data)
+    except Exception:
+        return json.dumps(data, indent=2, default=str)
 
 
 # ── Tool registry for discovery ──
@@ -168,17 +186,18 @@ async def start_here() -> str:
             cats[c] = {"description": TOOL_CATEGORIES.get(c, ""), "tool_count": 0, "tools": []}
         cats[c]["tool_count"] += 1
         cats[c]["tools"].append(t["name"])
-    return _json({
+    return _format_output({
         "server": "Chatwoot MCP Server",
         "description": "Complete Chatwoot API coverage via MCP. Manage conversations, contacts, messages, agents, inboxes, teams, labels, and more.",
         "chatwoot_connected": config_set,
         "total_tools": len(all_tools),
+        "output_format": _runtime_config.get("output_format", "json"),
         "categories": {name: {"description": info["description"], "tool_count": info["tool_count"], "tools": info["tools"]} for name, info in sorted(cats.items())},
         "usage": {
-            "browse": "list_tools(category='conversations') — list tools in a category with full parameter schemas",
-            "lookup": "list_tools(tool_name='create_message') — get full schema for a specific tool",
-            "search": "search_tools(query='assign') — find tools by keyword",
-            "verify": "check_connection() — test Chatwoot credentials",
+            "browse": "list_tools(category='conversations')",
+            "lookup": "list_tools(tool_name='create_message')",
+            "search": "search_tools(query='assign')",
+            "verify": "check_connection()",
         },
     })
 
@@ -191,7 +210,7 @@ async def list_tools(category: Optional[str] = None, tool_name: Optional[str] = 
     Call with no arguments to list all tools."""
     all_tools = _get_all_tools_metadata()
 
-    # Single tool lookup
+    # Single tool lookup — always JSON (agent needs structured params)
     if tool_name:
         tool = next((t for t in all_tools if t["name"] == tool_name), None)
         if not tool:
@@ -206,7 +225,7 @@ async def list_tools(category: Optional[str] = None, tool_name: Optional[str] = 
         if not all_tools:
             return _json({"error": f"No tools in category '{category}'", "available_categories": list(TOOL_CATEGORIES.keys())})
 
-    return _json({"tool_count": len(all_tools), "tools": all_tools})
+    return _format_output({"tool_count": len(all_tools), "tools": all_tools})
 
 
 @mcp.tool()
@@ -226,7 +245,7 @@ async def search_tools(query: str) -> str:
     matches.sort(key=lambda x: -x["_score"])
     for m in matches:
         del m["_score"]
-    return _json({"query": query, "results_count": len(matches), "results": matches})
+    return _format_output({"query": query, "results_count": len(matches), "results": matches})
 
 
 @mcp.tool()

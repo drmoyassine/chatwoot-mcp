@@ -54,7 +54,7 @@ class ToolExecutePayload(BaseModel):
 
 
 # ── Import MCP server and client ──
-from mcp_tools import mcp as mcp_server_instance, set_runtime_config, _runtime_config  # noqa: E402
+from mcp_tools import mcp as mcp_server_instance, set_runtime_config, set_output_format, _runtime_config  # noqa: E402
 from chatwoot_client import ChatwootClient  # noqa: E402
 
 
@@ -140,6 +140,28 @@ async def test_connection():
         raise HTTPException(status_code=400, detail=str(e))
 
 
+
+# ── Output Format API ──
+@api_router.get("/config/output-format")
+async def get_output_format():
+    return {"output_format": _runtime_config.get("output_format", "json")}
+
+
+@api_router.post("/config/output-format")
+async def save_output_format(payload: dict):
+    fmt = payload.get("output_format", "json")
+    if fmt not in ("json", "toon"):
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'json' or 'toon'.")
+    set_output_format(fmt)
+    await db.mcp_config.update_one(
+        {"key": "chatwoot"},
+        {"$set": {"output_format": fmt}},
+        upsert=True,
+    )
+    return {"output_format": fmt}
+
+
+
 # ── Tools Listing API ──
 def _get_tool_definitions() -> list:
     """Extract all registered MCP tools with their metadata."""
@@ -220,7 +242,12 @@ async def execute_tool(payload: ToolExecutePayload):
 
     try:
         result = await tool.fn(**payload.parameters)
-        return {"result": json.loads(result) if isinstance(result, str) else result}
+        if isinstance(result, str):
+            try:
+                return {"result": json.loads(result)}
+            except (json.JSONDecodeError, ValueError):
+                return {"result": result}  # TOON or other text format
+        return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -319,7 +346,12 @@ async def execute_tool_with_file(
         raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
     try:
         result = await tool.fn(**params)
-        return {"result": json.loads(result) if isinstance(result, str) else result}
+        if isinstance(result, str):
+            try:
+                return {"result": json.loads(result)}
+            except (json.JSONDecodeError, ValueError):
+                return {"result": result}
+        return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -405,13 +437,19 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 async def startup():
     # Load config from MongoDB if available
     config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
-    if config and config.get("chatwoot_url"):
-        _set_chatwoot_config(
-            config.get("chatwoot_url", ""),
-            config.get("api_token", ""),
-            config.get("account_id", 0),
-        )
-        logger.info(f"Loaded Chatwoot config from DB: {config.get('chatwoot_url', '')}")
+    if config:
+        # Load output format preference (always)
+        if config.get("output_format"):
+            set_output_format(config["output_format"])
+            logger.info(f"Output format: {config['output_format']}")
+        # Load Chatwoot credentials
+        if config.get("chatwoot_url"):
+            _set_chatwoot_config(
+                config.get("chatwoot_url", ""),
+                config.get("api_token", ""),
+                config.get("account_id", 0),
+            )
+            logger.info(f"Loaded Chatwoot config from DB: {config.get('chatwoot_url', '')}")
     else:
         # Use env vars (from .env file or Docker env)
         url = os.environ.get("CHATWOOT_URL", "")

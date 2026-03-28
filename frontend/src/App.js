@@ -109,6 +109,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [mcpInfo, setMcpInfo] = useState(null);
   const [activeTab, setActiveTab] = useState("tools"); // tools | filters | webhooks
+  const [outputFormat, setOutputFormat] = useState("json");
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -149,7 +150,26 @@ function App() {
     fetchConfig();
     fetchTools();
     fetchMcpInfo();
+    fetchOutputFormat();
   }, [fetchConfig, fetchTools, fetchMcpInfo]);
+
+  const fetchOutputFormat = async () => {
+    try {
+      const resp = await axios.get(`${API}/config/output-format`);
+      setOutputFormat(resp.data.output_format || "json");
+    } catch (e) {
+      console.error("Failed to fetch output format", e);
+    }
+  };
+
+  const handleOutputFormatChange = async (fmt) => {
+    try {
+      await axios.post(`${API}/config/output-format`, { output_format: fmt });
+      setOutputFormat(fmt);
+    } catch (e) {
+      console.error("Failed to save output format", e);
+    }
+  };
 
   const testConnection = async () => {
     setConnectionStatus("testing");
@@ -225,6 +245,8 @@ function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         tabs={TABS}
+        outputFormat={outputFormat}
+        onOutputFormatChange={handleOutputFormatChange}
       />
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden border-l border-[#E5E5E5]">
         {activeTab === "tools" && (
