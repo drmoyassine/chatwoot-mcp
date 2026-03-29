@@ -101,6 +101,18 @@ export default function ChatwootDashboard() {
 
   const api = useCallback(() => axiosAuth(), [axiosAuth]);
 
+  const testConnection = useCallback(async () => {
+    setConnectionStatus("testing");
+    try {
+      const resp = await api().post("/api/chatwoot/config/test");
+      setConnectionStatus("connected");
+      setAccountName(resp.data.account_name || "");
+    } catch (e) {
+      setConnectionStatus("error");
+      setAccountName("");
+    }
+  }, [api]);
+
   const fetchConfig = useCallback(async () => {
     try {
       const resp = await api().get("/api/chatwoot/config");
@@ -114,7 +126,7 @@ export default function ChatwootDashboard() {
     } catch (e) {
       console.error("Failed to fetch config", e);
     }
-  }, [api]);
+  }, [api, testConnection]);
 
   const fetchTools = useCallback(async () => {
     try {
@@ -134,21 +146,21 @@ export default function ChatwootDashboard() {
     }
   }, [api]);
 
-  useEffect(() => {
-    fetchConfig();
-    fetchTools();
-    fetchMcpInfo();
-    fetchOutputFormat();
-  }, [fetchConfig, fetchTools, fetchMcpInfo]);
-
-  const fetchOutputFormat = async () => {
+  const fetchOutputFormat = useCallback(async () => {
     try {
       const resp = await api().get("/api/chatwoot/config/output-format");
       setOutputFormat(resp.data.output_format || "json");
     } catch (e) {
       console.error("Failed to fetch output format", e);
     }
-  };
+  }, [api]);
+
+  useEffect(() => {
+    fetchConfig();
+    fetchTools();
+    fetchMcpInfo();
+    fetchOutputFormat();
+  }, [fetchConfig, fetchTools, fetchMcpInfo, fetchOutputFormat]);
 
   const handleOutputFormatChange = async (fmt) => {
     try {
@@ -156,18 +168,6 @@ export default function ChatwootDashboard() {
       setOutputFormat(fmt);
     } catch (e) {
       console.error("Failed to save output format", e);
-    }
-  };
-
-  const testConnection = async () => {
-    setConnectionStatus("testing");
-    try {
-      const resp = await api().post("/api/chatwoot/config/test");
-      setConnectionStatus("connected");
-      setAccountName(resp.data.account_name || "");
-    } catch (e) {
-      setConnectionStatus("error");
-      setAccountName("");
     }
   };
 
