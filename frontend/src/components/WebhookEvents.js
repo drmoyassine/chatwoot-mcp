@@ -40,7 +40,9 @@ export function WebhookEvents() {
   useEffect(() => {
     const loadHistory = async () => {
       try {
-        const resp = await axios.get(`${BACKEND_URL}/api/webhooks/events/history?limit=30`);
+        const resp = await axios.get(`${BACKEND_URL}/api/chatwoot/webhooks/events/history?limit=30`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("mcp_token") || ""}` },
+        });
         setEvents(resp.data.events || []);
       } catch (e) {
         console.error("Failed to load webhook history", e);
@@ -51,7 +53,8 @@ export function WebhookEvents() {
 
   // SSE connection
   useEffect(() => {
-    const url = `${BACKEND_URL}/api/webhooks/events`;
+    const token = localStorage.getItem("mcp_token") || "";
+    const url = `${BACKEND_URL}/api/chatwoot/webhooks/events${token ? `?api_key=${token}` : ""}`;
     const evtSource = new EventSource(url);
     evtSourceRef.current = evtSource;
 

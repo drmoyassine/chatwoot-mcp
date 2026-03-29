@@ -58,8 +58,8 @@ function JsonOutput({ data }) {
 function generateCurl(tool, baseUrl) {
   const isAttachment = tool.name === "create_message_with_attachment";
   const endpoint = isAttachment
-    ? `${baseUrl}/api/tools/execute-with-file`
-    : `${baseUrl}/api/tools/execute`;
+    ? `${baseUrl}/api/chatwoot/tools/execute-with-file`
+    : `${baseUrl}/api/chatwoot/tools/execute`;
 
   if (isAttachment) {
     const paramObj = {};
@@ -96,7 +96,7 @@ function ApiDocPanel({ tool }) {
   const baseUrl = (process.env.REACT_APP_BACKEND_URL || window.location.origin).replace(/\/$/, "");
 
   const isAttachment = tool.name === "create_message_with_attachment";
-  const endpoint = isAttachment ? "/api/tools/execute-with-file" : "/api/tools/execute";
+  const endpoint = isAttachment ? "/api/chatwoot/tools/execute-with-file" : "/api/chatwoot/tools/execute";
   const method = "POST";
   const fullUrl = `${baseUrl}${endpoint}`;
 

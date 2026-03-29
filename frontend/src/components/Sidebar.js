@@ -14,6 +14,8 @@ import {
   Zap,
   Eye,
   EyeOff,
+  ArrowLeft,
+  LogOut,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -37,6 +39,8 @@ export function Sidebar({
   tabs,
   outputFormat,
   onOutputFormatChange,
+  onBack,
+  onLogout,
 }) {
   const [isConfigOpen, setIsConfigOpen] = useState(true);
   const [isMcpOpen, setIsMcpOpen] = useState(true);
@@ -93,16 +97,36 @@ export function Sidebar({
     >
       {/* Header */}
       <div className="p-6 border-b border-[#E5E5E5]">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-xs text-[#666] hover:text-[#002FA7] font-mono mb-3 transition-colors"
+            data-testid="sidebar-back-button"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            All Servers
+          </button>
+        )}
         <div className="flex items-center gap-3 mb-2">
           <div className="w-8 h-8 bg-[#002FA7] flex items-center justify-center">
             <Server className="w-4 h-4 text-white" />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="font-heading text-lg font-bold tracking-tight text-[#0A0A0A]" data-testid="app-title">
               Chatwoot MCP
             </h1>
             <p className="text-xs text-[#666] font-mono">MODEL CONTEXT PROTOCOL</p>
           </div>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="text-[#999] hover:text-[#FF2A2A] transition-colors"
+              title="Logout"
+              data-testid="sidebar-logout-button"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-3">
           {statusIcon[connectionStatus]}
