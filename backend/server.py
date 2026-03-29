@@ -544,28 +544,41 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 
 @app.on_event("startup")
 async def startup():
-    # Create indexes
-    await db.api_keys.create_index("key_id", unique=True)
-    await db.api_keys.create_index([("app_name", 1), ("is_active", 1)])
+    # Create indexes (non-blocking — skip if MongoDB isn't ready yet)
+    try:
+        await db.api_keys.create_index("key_id", unique=True)
+        await db.api_keys.create_index([("app_name", 1), ("is_active", 1)])
+    except Exception as e:
+        logger.warning(f"Index creation deferred (MongoDB may not be ready): {e}")
 
     # Load chatwoot config
-    config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
-    if config:
-        if config.get("output_format"):
-            set_output_format(config["output_format"])
-            logger.info(f"Output format: {config['output_format']}")
-        if config.get("chatwoot_url"):
-            _set_chatwoot_config(config["chatwoot_url"], config.get("api_token", ""), config.get("account_id", 0))
-            logger.info(f"Loaded Chatwoot config from DB: {config['chatwoot_url']}")
-    else:
+    try:
+        config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
+        if config:
+            if config.get("output_format"):
+                set_output_format(config["output_format"])
+                logger.info(f"Output format: {config['output_format']}")
+            if config.get("chatwoot_url"):
+                _set_chatwoot_config(config["chatwoot_url"], config.get("api_token", ""), config.get("account_id", 0))
+                logger.info(f"Loaded Chatwoot config from DB: {config['chatwoot_url']}")
+        else:
+            url = os.environ.get("CHATWOOT_URL", "")
+            token = os.environ.get("CHATWOOT_API_TOKEN", "")
+            account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
+            if url and token:
+                set_runtime_config(url, token, account_id)
+                logger.info(f"Using Chatwoot config from env: {url}")
+            else:
+                logger.warning("No Chatwoot config found. Configure via UI or set env vars.")
+    except Exception as e:
+        logger.warning(f"Config loading deferred (MongoDB may not be ready): {e}")
+        # Fall back to env vars
         url = os.environ.get("CHATWOOT_URL", "")
         token = os.environ.get("CHATWOOT_API_TOKEN", "")
         account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
         if url and token:
             set_runtime_config(url, token, account_id)
-            logger.info(f"Using Chatwoot config from env: {url}")
-        else:
-            logger.warning("No Chatwoot config found. Configure via UI or set env vars.")
+            logger.info(f"Using Chatwoot config from env (DB unavailable): {url}")
 
     logger.info(f"Admin email: {os.environ.get('ADMIN_EMAIL', 'NOT SET')}")
 
