@@ -9,8 +9,23 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE = timedelta(hours=24)
 
 
+_auto_jwt_secret = None
+
+
 def get_jwt_secret() -> str:
-    return os.environ["JWT_SECRET"]
+    global _auto_jwt_secret
+    secret = os.environ.get("JWT_SECRET", "")
+    if secret:
+        return secret
+    # Auto-generate a stable secret for this process lifetime
+    if _auto_jwt_secret is None:
+        _auto_jwt_secret = secrets.token_hex(32)
+        import logging
+        logging.getLogger(__name__).warning(
+            "JWT_SECRET not set — auto-generated for this session. "
+            "Set JWT_SECRET in env vars for persistent sessions across restarts."
+        )
+    return _auto_jwt_secret
 
 
 def create_access_token(email: str) -> str:

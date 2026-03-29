@@ -506,6 +506,7 @@ async def handle_sse(request):
 #  Root API
 # ══════════════════════════════════════════════════════════════════
 @app.get("/api")
+@app.get("/api/")
 async def api_root():
     return {"message": "MCP Hub API", "version": "1.0"}
 
