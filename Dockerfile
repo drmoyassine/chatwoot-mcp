@@ -39,13 +39,16 @@ COPY backend/ ./
 # Copy built frontend from stage 1
 COPY --from=frontend-build /frontend/build ./static
 
-# Default env vars (override at runtime)
+# Default env vars (override at runtime via Easypanel/docker-compose)
 ENV CHATWOOT_URL=""
 ENV CHATWOOT_API_TOKEN=""
 ENV CHATWOOT_ACCOUNT_ID=""
 ENV MONGO_URL="mongodb://mongodb:27017"
 ENV DB_NAME="chatwoot_mcp"
 ENV CORS_ORIGINS="*"
+ENV ADMIN_EMAIL=""
+ENV ADMIN_PASSWORD=""
+ENV JWT_SECRET=""
 
 EXPOSE 8001
 

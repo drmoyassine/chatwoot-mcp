@@ -17,7 +17,10 @@ from pydantic import BaseModel
 from typing import Optional
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env', override=True)
+# Load .env: try working dir first (Easypanel creates .env here), then backend dir as fallback
+# override=True so .env file values win over empty Docker ENV defaults
+load_dotenv(override=True)
+load_dotenv(ROOT_DIR / '.env', override=False)
 
 STATIC_DIR = ROOT_DIR / "static"
 
