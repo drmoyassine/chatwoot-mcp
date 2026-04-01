@@ -17,10 +17,26 @@ from pydantic import BaseModel
 from typing import Optional
 
 ROOT_DIR = Path(__file__).parent
-# Load .env: try working dir first (Easypanel creates .env here), then backend dir as fallback
-# override=True so .env file values win over empty Docker ENV defaults
-load_dotenv(override=True)
-load_dotenv(ROOT_DIR / '.env', override=False)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Load .env from all possible locations (Easypanel/Docker compatibility)
+_env_search_paths = [
+    ROOT_DIR / '.env',
+    Path('/app/.env'),
+    Path('/app/backend/.env'),
+    Path.cwd() / '.env',
+]
+_loaded_any = False
+for _p in _env_search_paths:
+    if _p.exists():
+        load_dotenv(_p, override=not _loaded_any)  # First found file wins
+        logger.info(f"Loaded .env from: {_p}")
+        _loaded_any = True
+if not _loaded_any:
+    load_dotenv(override=True)  # Fallback: python-dotenv auto-search
+    logger.info("No .env file found at known paths, using auto-search")
 
 STATIC_DIR = ROOT_DIR / "static"
 
@@ -30,9 +46,6 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 # In-memory event subscribers for SSE streaming
 webhook_subscribers: list[asyncio.Queue] = []
