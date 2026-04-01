@@ -17,6 +17,9 @@ services:
     ports:
       - "8001:8001"
     environment:
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      JWT_SECRET: "${JWT_SECRET:-}"
       CHATWOOT_URL: "${CHATWOOT_URL:-}"
       CHATWOOT_API_TOKEN: "${CHATWOOT_API_TOKEN:-}"
       CHATWOOT_ACCOUNT_ID: "${CHATWOOT_ACCOUNT_ID:-}"
