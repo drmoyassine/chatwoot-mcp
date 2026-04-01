@@ -14,10 +14,13 @@ import {
   Layers,
   FileText,
   ChevronRight,
+  Plus,
+  Pencil,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 
 const CATEGORY_ICONS = {
   all: Layers,
@@ -82,6 +85,10 @@ export function ToolExplorer({
   onSearchChange,
   selectedTool,
   onSelectTool,
+  onEditParam,
+  onAddParam,
+  onToggleTool,
+  onCreateTool,
 }) {
   const [hoveredTool, setHoveredTool] = useState(null);
 
@@ -92,9 +99,21 @@ export function ToolExplorer({
     >
       {/* Header */}
       <div className="p-4 border-b border-[#E5E5E5]">
-        <h2 className="font-heading text-xl font-bold tracking-tight text-[#0A0A0A] mb-3" data-testid="tool-explorer-title">
-          Tool Explorer
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-heading text-xl font-bold tracking-tight text-[#0A0A0A]" data-testid="tool-explorer-title">
+            Tool Explorer
+          </h2>
+          {onCreateTool && (
+            <button
+              onClick={onCreateTool}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-[#002FA7] text-white text-[10px] font-mono uppercase tracking-wider hover:bg-[#001B66] transition-colors"
+              data-testid="create-tool-button"
+            >
+              <Plus className="w-3 h-3" />
+              New Tool
+            </button>
+          )}
+        </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#999]" />
           <Input
@@ -149,22 +168,38 @@ export function ToolExplorer({
               const method = getMethodBadge(tool.name);
               const isSelected = selectedTool?.name === tool.name;
               const isHovered = hoveredTool === tool.name;
+              const isEnabled = tool.enabled !== false;
               return (
-                <button
+                <div
                   key={tool.name}
-                  onClick={() => onSelectTool(tool)}
-                  onMouseEnter={() => setHoveredTool(tool.name)}
-                  onMouseLeave={() => setHoveredTool(null)}
                   className={`w-full text-left px-4 py-3 flex items-start gap-3 transition-colors duration-150 ${
+                    !isEnabled ? "opacity-40" : ""
+                  } ${
                     isSelected
                       ? "bg-[#002FA7]/5 border-l-2 border-l-[#002FA7]"
                       : isHovered
                       ? "bg-[#F5F5F5]"
                       : ""
                   }`}
+                  onMouseEnter={() => setHoveredTool(tool.name)}
+                  onMouseLeave={() => setHoveredTool(null)}
                   data-testid={`tool-item-${tool.name}`}
                 >
-                  <div className="flex-1 min-w-0">
+                  {/* Toggle */}
+                  {onToggleTool && (
+                    <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={isEnabled}
+                        onCheckedChange={() => onToggleTool(tool.name, !isEnabled)}
+                        className="data-[state=checked]:bg-[#00A040] scale-75"
+                        data-testid={`toggle-tool-${tool.name}`}
+                      />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => onSelectTool(tool)}
+                    className="flex-1 min-w-0 text-left"
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <Badge
                         variant="outline"
@@ -175,6 +210,11 @@ export function ToolExplorer({
                       <span className="font-mono text-sm font-medium text-[#0A0A0A] truncate">
                         {tool.name}
                       </span>
+                      {tool.source === "custom" && (
+                        <Badge variant="outline" className="text-[9px] font-mono px-1 py-0 text-[#8B5CF6] border-[#8B5CF6]/30 bg-[#8B5CF6]/5">
+                          CUSTOM
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-[#666] line-clamp-2 leading-relaxed">
                       {tool.description}
@@ -184,13 +224,23 @@ export function ToolExplorer({
                         {tool.parameters.slice(0, 4).map((p) => (
                           <span
                             key={p.name}
-                            className={`text-[10px] font-mono px-1.5 py-0.5 border ${
+                            className={`inline-flex items-center gap-0.5 text-[10px] font-mono px-1.5 py-0.5 border group/param ${
                               p.required
                                 ? "text-[#002FA7] border-[#002FA7]/20 bg-[#002FA7]/5"
                                 : "text-[#999] border-[#E5E5E5] bg-[#FAFAFA]"
                             }`}
                           >
                             {p.name}
+                            {onEditParam && (
+                              <Pencil
+                                className="w-2.5 h-2.5 opacity-0 group-hover/param:opacity-100 hover:text-[#002FA7] cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEditParam(tool, p);
+                                }}
+                                data-testid={`edit-param-icon-${tool.name}-${p.name}`}
+                              />
+                            )}
                           </span>
                         ))}
                         {tool.parameters.length > 4 && (
@@ -200,13 +250,13 @@ export function ToolExplorer({
                         )}
                       </div>
                     )}
-                  </div>
+                  </button>
                   <ChevronRight
                     className={`w-4 h-4 flex-shrink-0 mt-1 transition-colors ${
                       isSelected ? "text-[#002FA7]" : "text-[#ccc]"
                     }`}
                   />
-                </button>
+                </div>
               );
             })
           )}

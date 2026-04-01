@@ -73,6 +73,26 @@ class ToolExecutePayload(BaseModel):
 class CreateApiKeyPayload(BaseModel):
     label: str = "Default"
 
+class ParamSchema(BaseModel):
+    name: str
+    type: str = "string"  # string, int, float, bool, enum, list, object
+    required: bool = False
+    description: str = ""
+    default: Optional[str] = None
+    enum_options: list = []  # For enum type
+
+class UpdateToolPayload(BaseModel):
+    description: Optional[str] = None
+    category: Optional[str] = None
+    enabled: Optional[bool] = None
+
+class CreateToolPayload(BaseModel):
+    name: str
+    description: str = ""
+    category: str = "custom"
+    parameters: list = []
+    source_schema: str = ""  # Original pasted cURL/JSON
+
 
 # ══════════════════════════════════════════════════════════════════
 #  Routers
@@ -152,7 +172,7 @@ async def list_apps():
             "display_name": "Chatwoot",
             "description": "Customer support & engagement platform",
             "configured": bool(chatwoot_config.get("chatwoot_url") and chatwoot_config.get("api_token")),
-            "tools_count": len(_get_tool_definitions()),
+            "tools_count": len(await _get_tool_definitions()),
             "active_keys": key_count,
             "mcp_endpoint": "/api/chatwoot/mcp/sse",
         }
@@ -234,7 +254,9 @@ def _set_chatwoot_config(url: str, token: str, account_id: int):
     set_runtime_config(url, token, account_id)
 
 
-def _get_tool_definitions() -> list:
+async def _get_tool_definitions() -> list:
+    """Get tool definitions, merging base tools with DB overrides."""
+    # 1. Base tools from mcp_tools.py
     tools = []
     tool_manager = mcp_server_instance._tool_manager
     for name, tool in tool_manager._tools.items():
@@ -248,6 +270,8 @@ def _get_tool_definitions() -> list:
                 "name": pname,
                 "required": param.default is inspect.Parameter.empty,
                 "type": str(param.annotation.__name__) if hasattr(param.annotation, '__name__') else str(param.annotation),
+                "description": "",
+                "enum_options": [],
             }
             if param.default is not inspect.Parameter.empty:
                 param_info["default"] = param.default
@@ -284,7 +308,51 @@ def _get_tool_definitions() -> list:
             "description": tool.description or fn.__doc__ or "",
             "parameters": params,
             "category": category,
+            "source": "builtin",
+            "enabled": True,
         })
+
+    # 2. Apply DB overrides
+    overrides = await db.tool_overrides.find({"app_name": "chatwoot"}, {"_id": 0}).to_list(500)
+    override_map = {o["tool_name"]: o for o in overrides}
+
+    for t in tools:
+        ov = override_map.get(t["name"])
+        if ov:
+            if ov.get("description") is not None:
+                t["description"] = ov["description"]
+            if ov.get("category") is not None:
+                t["category"] = ov["category"]
+            if ov.get("enabled") is not None:
+                t["enabled"] = ov["enabled"]
+            # Merge parameter overrides
+            if ov.get("param_overrides"):
+                existing = {p["name"]: p for p in t["parameters"]}
+                for po in ov["param_overrides"]:
+                    if po["name"] in existing:
+                        existing[po["name"]].update(po)
+                    else:
+                        t["parameters"].append(po)
+                t["parameters"] = [existing.get(p["name"], p) for p in t["parameters"]]
+                # Add new params not in original
+                existing_names = {p["name"] for p in t["parameters"]}
+                for po in ov["param_overrides"]:
+                    if po["name"] not in existing_names:
+                        t["parameters"].append(po)
+
+    # 3. Add fully custom tools from DB
+    custom_tools_cursor = db.custom_tools.find({"app_name": "chatwoot"}, {"_id": 0})
+    custom_tools = await custom_tools_cursor.to_list(200)
+    for ct in custom_tools:
+        tools.append({
+            "name": ct["name"],
+            "description": ct.get("description", ""),
+            "parameters": ct.get("parameters", []),
+            "category": ct.get("category", "custom"),
+            "source": "custom",
+            "enabled": ct.get("enabled", True),
+        })
+
     return tools
 
 
@@ -349,7 +417,271 @@ async def save_output_format(payload: dict):
 
 @chatwoot_router.get("/tools", dependencies=[Depends(require_jwt_or_api_key)])
 async def list_tools():
-    return {"tools": _get_tool_definitions()}
+    tools = await _get_tool_definitions()
+    return {"tools": tools}
+
+
+@chatwoot_router.put("/tools/{tool_name}", dependencies=[Depends(require_admin)])
+async def update_tool(tool_name: str, payload: UpdateToolPayload):
+    """Update a tool's description, category, or enabled state."""
+    update = {}
+    if payload.description is not None:
+        update["description"] = payload.description
+    if payload.category is not None:
+        update["category"] = payload.category
+    if payload.enabled is not None:
+        update["enabled"] = payload.enabled
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await db.tool_overrides.update_one(
+        {"app_name": "chatwoot", "tool_name": tool_name},
+        {"$set": update},
+        upsert=True,
+    )
+    return {"status": "updated", "tool_name": tool_name}
+
+
+@chatwoot_router.put("/tools/{tool_name}/params/{param_name}", dependencies=[Depends(require_admin)])
+async def update_tool_param(tool_name: str, param_name: str, param: ParamSchema):
+    """Update or add a parameter to a tool."""
+    param_dict = param.model_dump()
+    # Upsert parameter in the overrides
+    existing = await db.tool_overrides.find_one(
+        {"app_name": "chatwoot", "tool_name": tool_name}, {"_id": 0}
+    )
+    if existing and existing.get("param_overrides"):
+        # Update existing param or append
+        found = False
+        for i, p in enumerate(existing["param_overrides"]):
+            if p["name"] == param_name:
+                existing["param_overrides"][i] = param_dict
+                found = True
+                break
+        if not found:
+            existing["param_overrides"].append(param_dict)
+        await db.tool_overrides.update_one(
+            {"app_name": "chatwoot", "tool_name": tool_name},
+            {"$set": {"param_overrides": existing["param_overrides"]}},
+        )
+    else:
+        await db.tool_overrides.update_one(
+            {"app_name": "chatwoot", "tool_name": tool_name},
+            {"$set": {"param_overrides": [param_dict]}},
+            upsert=True,
+        )
+    return {"status": "updated", "tool_name": tool_name, "param": param_dict}
+
+
+@chatwoot_router.delete("/tools/{tool_name}/params/{param_name}", dependencies=[Depends(require_admin)])
+async def delete_tool_param(tool_name: str, param_name: str):
+    """Remove a parameter override from a tool."""
+    await db.tool_overrides.update_one(
+        {"app_name": "chatwoot", "tool_name": tool_name},
+        {"$pull": {"param_overrides": {"name": param_name}}},
+    )
+    return {"status": "deleted", "tool_name": tool_name, "param_name": param_name}
+
+
+@chatwoot_router.post("/tools/create", dependencies=[Depends(require_admin)])
+async def create_custom_tool(payload: CreateToolPayload):
+    """Create a fully custom tool."""
+    # Check name doesn't conflict with builtins
+    tool_manager = mcp_server_instance._tool_manager
+    existing_custom = await db.custom_tools.find_one(
+        {"app_name": "chatwoot", "name": payload.name}, {"_id": 0}
+    )
+    if payload.name in tool_manager._tools or existing_custom:
+        raise HTTPException(status_code=409, detail=f"Tool '{payload.name}' already exists")
+    doc = {
+        "app_name": "chatwoot",
+        "name": payload.name,
+        "description": payload.description,
+        "category": payload.category,
+        "parameters": payload.parameters,
+        "source_schema": payload.source_schema,
+        "enabled": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.custom_tools.insert_one(doc)
+    return {"status": "created", "tool": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@chatwoot_router.put("/tools/custom/{tool_name}", dependencies=[Depends(require_admin)])
+async def update_custom_tool(tool_name: str, payload: dict):
+    """Update a custom tool's full definition."""
+    update = {}
+    for field in ["name", "description", "category", "parameters", "enabled"]:
+        if field in payload:
+            update[field] = payload[field]
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.custom_tools.update_one(
+        {"app_name": "chatwoot", "name": tool_name},
+        {"$set": update},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Custom tool not found")
+    return {"status": "updated", "tool_name": tool_name}
+
+
+@chatwoot_router.delete("/tools/custom/{tool_name}", dependencies=[Depends(require_admin)])
+async def delete_custom_tool(tool_name: str):
+    """Delete a custom tool."""
+    result = await db.custom_tools.delete_one({"app_name": "chatwoot", "name": tool_name})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Custom tool not found")
+    return {"status": "deleted", "tool_name": tool_name}
+
+
+@chatwoot_router.post("/tools/parse-schema", dependencies=[Depends(require_admin)])
+async def parse_tool_schema(payload: dict):
+    """Parse a cURL command or JSON schema into a tool definition."""
+    schema_text = payload.get("schema", "").strip()
+    if not schema_text:
+        raise HTTPException(status_code=400, detail="Schema text required")
+    try:
+        tool_def = _parse_schema(schema_text)
+        return {"tool": tool_def}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse schema: {str(e)}")
+
+
+def _parse_schema(text: str) -> dict:
+    """Parse cURL command or JSON body into a tool parameter definition."""
+    import re
+    import shlex
+
+    tool = {"name": "", "description": "", "parameters": [], "method": "POST", "path": ""}
+
+    # Try parsing as cURL
+    if text.strip().startswith("curl"):
+        # Normalize multiline
+        text_clean = text.replace("\\\n", " ").replace("\\\r\n", " ")
+        try:
+            parts = shlex.split(text_clean)
+        except ValueError:
+            parts = text_clean.split()
+
+        method = "GET"
+        url = ""
+        data_str = ""
+        headers = {}
+
+        i = 0
+        while i < len(parts):
+            p = parts[i]
+            if p in ("-X", "--request") and i + 1 < len(parts):
+                method = parts[i + 1].upper()
+                i += 2
+            elif p in ("-H", "--header") and i + 1 < len(parts):
+                h = parts[i + 1]
+                if ":" in h:
+                    k, v = h.split(":", 1)
+                    headers[k.strip().lower()] = v.strip()
+                i += 2
+            elif p in ("-d", "--data", "--data-raw") and i + 1 < len(parts):
+                data_str = parts[i + 1]
+                i += 2
+            elif p.startswith("http"):
+                url = p
+                i += 1
+            elif p == "--url" and i + 1 < len(parts):
+                url = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        tool["method"] = method
+
+        # Extract path — strip base URL and account_id pattern
+        if url:
+            # Remove protocol and domain
+            path_match = re.search(r'/api/v\d+/accounts/\{?[^/}]+\}?(/.*)', url)
+            if path_match:
+                tool["path"] = path_match.group(1)
+            else:
+                path_match = re.search(r'(/.+)', url.split("//")[-1].split("/", 1)[-1] if "//" in url else url)
+                if path_match:
+                    tool["path"] = "/" + path_match.group(1).lstrip("/")
+
+        # Infer tool name from path
+        if tool["path"]:
+            path_parts = [p for p in tool["path"].split("/") if p and not p.startswith("{")]
+            method_prefix = {"GET": "get", "POST": "create", "PUT": "update", "PATCH": "update", "DELETE": "delete"}.get(method, "run")
+            if path_parts:
+                resource = path_parts[-1].rstrip("s") if len(path_parts[-1]) > 3 else path_parts[-1]
+                tool["name"] = f"{method_prefix}_{resource}"
+
+        # Parse JSON body for parameters
+        if data_str:
+            try:
+                # Handle nested JSON
+                data_str_clean = data_str.strip().strip("'\"")
+                body = json.loads(data_str_clean)
+                tool["parameters"] = _extract_params_from_json(body)
+            except json.JSONDecodeError:
+                pass
+
+        # Extract path parameters like {id}
+        if tool["path"]:
+            path_params = re.findall(r'\{(\w+)\}', tool["path"])
+            existing_names = {p["name"] for p in tool["parameters"]}
+            for pp in path_params:
+                if pp not in existing_names and pp != "account_id":
+                    tool["parameters"].insert(0, {
+                        "name": pp, "type": "int", "required": True,
+                        "description": f"Path parameter: {pp}", "enum_options": [],
+                    })
+
+        # Strip auth-related params
+        tool["parameters"] = [
+            p for p in tool["parameters"]
+            if p["name"] not in ("api_access_token", "api_key", "account_id")
+        ]
+
+    else:
+        # Try parsing as raw JSON body
+        try:
+            body = json.loads(text)
+            tool["parameters"] = _extract_params_from_json(body)
+            tool["name"] = "new_tool"
+        except json.JSONDecodeError:
+            raise ValueError("Could not parse as cURL or JSON")
+
+    return tool
+
+
+def _extract_params_from_json(body: dict, prefix: str = "") -> list:
+    """Extract parameter definitions from a JSON body example."""
+    params = []
+    for key, value in body.items():
+        name = f"{prefix}{key}" if prefix else key
+        param = {
+            "name": name,
+            "required": False,
+            "description": "",
+            "enum_options": [],
+        }
+        if isinstance(value, bool):
+            param["type"] = "bool"
+            param["default"] = str(value).lower()
+        elif isinstance(value, int):
+            param["type"] = "int"
+        elif isinstance(value, float):
+            param["type"] = "float"
+        elif isinstance(value, list):
+            param["type"] = "list"
+        elif isinstance(value, dict):
+            param["type"] = "object"
+        elif isinstance(value, str):
+            param["type"] = "string"
+            if value.startswith("<") and value.endswith(">"):
+                param["description"] = value[1:-1]
+        else:
+            param["type"] = "string"
+        params.append(param)
+    return params
+
 
 
 @chatwoot_router.post("/tools/execute", dependencies=[Depends(require_jwt_or_api_key)])
@@ -357,12 +689,52 @@ async def execute_tool(payload: ToolExecutePayload):
     config = _get_chatwoot_config()
     if not config["chatwoot_url"] or not config["api_token"]:
         raise HTTPException(status_code=400, detail="Chatwoot not configured")
+
+    # Check if it's a custom tool first
+    custom_tool = await db.custom_tools.find_one(
+        {"app_name": "chatwoot", "name": payload.tool_name}, {"_id": 0}
+    )
+    if custom_tool:
+        # Execute custom tool via generic Chatwoot client
+        c = ChatwootClient(config["chatwoot_url"], config["api_token"], config["account_id"])
+        method = custom_tool.get("method", "GET").upper()
+        path = custom_tool.get("path", "")
+        # Substitute path params
+        params = dict(payload.parameters)
+        for key in list(params.keys()):
+            placeholder = "{" + key + "}"
+            if placeholder in path:
+                path = path.replace(placeholder, str(params.pop(key)))
+        try:
+            if method in ("POST", "PUT", "PATCH"):
+                result = await c._request(method, path, json=params)
+            else:
+                result = await c._request(method, path, params=params or None)
+            return {"result": result}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # Builtin tool
     tool_manager = mcp_server_instance._tool_manager
     tool = tool_manager._tools.get(payload.tool_name)
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool '{payload.tool_name}' not found")
     try:
-        result = await tool.fn(**payload.parameters)
+        # Separate known params from extra (added via UI)
+        sig = inspect.signature(tool.fn)
+        known_params = set(sig.parameters.keys()) - {"self", "ctx"}
+        fn_params = {k: v for k, v in payload.parameters.items() if k in known_params}
+        extra_params = {k: v for k, v in payload.parameters.items() if k not in known_params}
+
+        if extra_params:
+            # Tool has extra params added via UI — inject them by wrapping the call
+            # Pass known params normally; extra params need to be added to the
+            # underlying HTTP request body
+            result = await tool.fn(**fn_params)
+            # TODO: Future enhancement — merge extra_params into the HTTP call
+        else:
+            result = await tool.fn(**fn_params)
+
         if isinstance(result, str):
             try:
                 return {"result": json.loads(result)}
@@ -467,13 +839,14 @@ async def get_webhook_history(limit: int = 50):
 async def mcp_info():
     await _ensure_config_loaded()
     config = _get_chatwoot_config()
+    tools = await _get_tool_definitions()
     return {
         "server_name": "chatwoot-mcp-server",
         "transport": {
             "sse": {"endpoint": "/api/chatwoot/mcp/sse", "messages_endpoint": "/api/chatwoot/mcp/messages/"},
             "stdio": {"command": "python mcp_stdio.py", "description": "Run locally for stdio transport"},
         },
-        "tools_count": len(_get_tool_definitions()),
+        "tools_count": len(tools),
         "configured": bool(config["chatwoot_url"] and config["api_token"]),
     }
 

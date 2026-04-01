@@ -11,6 +11,8 @@ import {
   ChevronDown,
   FileCode2,
   Braces,
+  Pencil,
+  Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -262,7 +264,7 @@ function ApiDocPanel({ tool }) {
   );
 }
 
-export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, connectionStatus }) {
+export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, connectionStatus, onEditParam, onAddParam }) {
   const [params, setParams] = useState({});
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -457,14 +459,33 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
             {/* Parameters */}
             {selectedTool.parameters.length > 0 && (
               <div className="px-4 py-3 border-b border-[#222] space-y-2 max-h-[240px] overflow-y-auto">
-                <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider block mb-2">
-                  Parameters
-                </span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-mono text-[10px] text-[#666] uppercase tracking-wider">
+                    Parameters
+                  </span>
+                  {onAddParam && (
+                    <button
+                      onClick={() => onAddParam(selectedTool)}
+                      className="text-[#555] hover:text-[#00E559] transition-colors"
+                      title="Add parameter"
+                      data-testid="terminal-add-param"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
                 {selectedTool.parameters.map((p) => (
-                  <div key={p.name} className="flex items-center gap-2">
-                    <label className="font-mono text-xs text-[#888] w-32 flex-shrink-0 truncate" title={p.name}>
+                  <div key={p.name} className="flex items-center gap-2 group/param">
+                    <label className="font-mono text-xs text-[#888] w-32 flex-shrink-0 truncate flex items-center gap-1" title={p.name}>
                       {p.name}
                       {p.required && <span className="text-[#FF2A2A] ml-0.5">*</span>}
+                      {onEditParam && (
+                        <Pencil
+                          className="w-2.5 h-2.5 opacity-0 group-hover/param:opacity-100 text-[#555] hover:text-[#00E559] cursor-pointer transition-opacity"
+                          onClick={() => onEditParam(selectedTool, p)}
+                          data-testid={`terminal-edit-param-${p.name}`}
+                        />
+                      )}
                     </label>
                     {p.type === "bool" || p.type === "boolean" ? (
                       <Switch
@@ -473,6 +494,18 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
                         className="data-[state=checked]:bg-[#002FA7]"
                         data-testid={`param-input-${p.name}`}
                       />
+                    ) : p.type === "enum" && p.enum_options?.length > 0 ? (
+                      <select
+                        value={params[p.name] ?? ""}
+                        onChange={(e) => handleParamChange(p.name, e.target.value)}
+                        className="flex-1 bg-[#151515] border border-[#333] text-[#E5E5E5] font-mono text-xs px-2 py-1.5 focus:border-[#00E559] focus:outline-none"
+                        data-testid={`param-input-${p.name}`}
+                      >
+                        <option value="">Select...</option>
+                        {p.enum_options.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
                     ) : (
                       <input
                         value={params[p.name] ?? ""}

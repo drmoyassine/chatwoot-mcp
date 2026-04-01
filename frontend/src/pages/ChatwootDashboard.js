@@ -7,6 +7,8 @@ import { TestTerminal } from "@/components/TestTerminal";
 import { FilterBuilder } from "@/components/FilterBuilder";
 import { WebhookEvents } from "@/components/WebhookEvents";
 import { ApiKeyManager } from "@/components/ApiKeyManager";
+import { ParamEditModal } from "@/components/ParamEditModal";
+import { CreateToolModal } from "@/components/CreateToolModal";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -98,6 +100,9 @@ export default function ChatwootDashboard() {
   const [mcpInfo, setMcpInfo] = useState(null);
   const [activeTab, setActiveTab] = useState("tools");
   const [outputFormat, setOutputFormat] = useState("json");
+  const [editingParam, setEditingParam] = useState(null); // { tool, param }
+  const [addingParam, setAddingParam] = useState(null); // tool
+  const [showCreateTool, setShowCreateTool] = useState(false);
 
   const api = useCallback(() => axiosAuth(), [axiosAuth]);
 
@@ -201,6 +206,40 @@ export default function ChatwootDashboard() {
     return resp.data;
   };
 
+  const handleSaveParam = async (paramData) => {
+    const toolName = editingParam?.tool?.name || addingParam?.name;
+    if (!toolName) return;
+    try {
+      await api().put(
+        `/api/chatwoot/tools/${toolName}/params/${paramData.name}`,
+        paramData,
+      );
+      await fetchTools();
+      // Update selected tool if it's the one being edited
+      if (selectedTool?.name === toolName) {
+        const updatedTools = (await api().get("/api/chatwoot/tools")).data.tools;
+        const updated = updatedTools.find((t) => t.name === toolName);
+        if (updated) setSelectedTool(updated);
+      }
+    } catch (e) {
+      console.error("Failed to save param", e);
+    }
+    setEditingParam(null);
+    setAddingParam(null);
+  };
+
+  const handleToggleTool = async (toolName, enabled) => {
+    try {
+      await api().put(`/api/chatwoot/tools/${toolName}`, { enabled });
+      await fetchTools();
+      if (selectedTool?.name === toolName) {
+        setSelectedTool((t) => (t ? { ...t, enabled } : t));
+      }
+    } catch (e) {
+      console.error("Failed to toggle tool", e);
+    }
+  };
+
   const categories = ["all", ...new Set(tools.map((t) => t.category))].sort();
   const filteredTools = tools.filter((t) => {
     const matchesCategory = selectedCategory === "all" || t.category === selectedCategory;
@@ -249,12 +288,18 @@ export default function ChatwootDashboard() {
               onSearchChange={setSearchQuery}
               selectedTool={selectedTool}
               onSelectTool={setSelectedTool}
+              onEditParam={(tool, param) => setEditingParam({ tool, param })}
+              onAddParam={(tool) => setAddingParam(tool)}
+              onToggleTool={handleToggleTool}
+              onCreateTool={() => setShowCreateTool(true)}
             />
             <TestTerminal
               selectedTool={selectedTool}
               onExecute={executeTool}
               onExecuteWithFile={executeToolWithFile}
               connectionStatus={connectionStatus}
+              onEditParam={(tool, param) => setEditingParam({ tool, param })}
+              onAddParam={(tool) => setAddingParam(tool)}
             />
           </>
         )}
@@ -270,6 +315,31 @@ export default function ChatwootDashboard() {
           </div>
         )}
       </div>
+
+      {/* Modals */}
+      {editingParam && (
+        <ParamEditModal
+          param={editingParam.param}
+          toolName={editingParam.tool.name}
+          onSave={handleSaveParam}
+          onClose={() => setEditingParam(null)}
+        />
+      )}
+      {addingParam && (
+        <ParamEditModal
+          param={null}
+          toolName={addingParam.name}
+          onSave={handleSaveParam}
+          onClose={() => setAddingParam(null)}
+        />
+      )}
+      {showCreateTool && (
+        <CreateToolModal
+          categories={categories}
+          onClose={() => setShowCreateTool(false)}
+          onCreated={fetchTools}
+        />
+      )}
     </div>
   );
 }
