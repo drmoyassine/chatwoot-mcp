@@ -46,9 +46,8 @@ ENV CHATWOOT_ACCOUNT_ID=""
 ENV MONGO_URL="mongodb://mongodb:27017"
 ENV DB_NAME="chatwoot_mcp"
 ENV CORS_ORIGINS="*"
-ENV ADMIN_EMAIL=""
-ENV ADMIN_PASSWORD=""
-ENV JWT_SECRET=""
+# NOTE: ADMIN_EMAIL, ADMIN_PASSWORD, JWT_SECRET intentionally NOT set here
+# so runtime injection (Easypanel/docker-compose) is not masked by empty defaults
 
 EXPOSE 8001
 
