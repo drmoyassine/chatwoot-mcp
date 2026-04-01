@@ -21,22 +21,64 @@ ROOT_DIR = Path(__file__).parent
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Load .env from all possible locations (Easypanel/Docker compatibility)
+# ── Debug: dump environment state before any .env loading ──
+_auth_vars = ['ADMIN_EMAIL', 'ADMIN_PASSWORD', 'JWT_SECRET', 'CHATWOOT_URL', 'MONGO_URL']
+logger.info(f"[ENV DEBUG] CWD: {os.getcwd()}")
+logger.info(f"[ENV DEBUG] __file__: {__file__}, ROOT_DIR: {ROOT_DIR}")
+for _v in _auth_vars:
+    _val = os.environ.get(_v)
+    if _val is None:
+        logger.info(f"[ENV DEBUG] {_v} = <NOT IN os.environ>")
+    elif _val == "":
+        logger.info(f"[ENV DEBUG] {_v} = <EMPTY STRING>")
+    else:
+        logger.info(f"[ENV DEBUG] {_v} = {_val[:6]}*** (len={len(_val)})")
+
+# ── Search for ALL .env files on disk ──
+import subprocess
+try:
+    _find_result = subprocess.run(
+        ['find', '/', '-name', '.env', '-type', 'f', '-not', '-path', '*/proc/*', '-not', '-path', '*/sys/*'],
+        capture_output=True, text=True, timeout=5
+    )
+    _found_files = [f.strip() for f in _find_result.stdout.strip().split('\n') if f.strip()]
+    logger.info(f"[ENV DEBUG] .env files found on disk: {_found_files}")
+except Exception as _e:
+    logger.info(f"[ENV DEBUG] find .env failed: {_e}")
+
+# ── Load .env from all possible locations ──
 _env_search_paths = [
     ROOT_DIR / '.env',
     Path('/app/.env'),
     Path('/app/backend/.env'),
     Path.cwd() / '.env',
 ]
+# Also add any .env files found by the search
+for _f in _found_files if '_found_files' in dir() else []:
+    _p = Path(_f)
+    if _p not in _env_search_paths:
+        _env_search_paths.append(_p)
+
 _loaded_any = False
 for _p in _env_search_paths:
     if _p.exists():
-        load_dotenv(_p, override=not _loaded_any)  # First found file wins
-        logger.info(f"Loaded .env from: {_p}")
+        load_dotenv(_p, override=True)
+        logger.info(f"[ENV DEBUG] Loaded .env from: {_p}")
         _loaded_any = True
 if not _loaded_any:
-    load_dotenv(override=True)  # Fallback: python-dotenv auto-search
-    logger.info("No .env file found at known paths, using auto-search")
+    load_dotenv(override=True)
+    logger.info("[ENV DEBUG] No .env file found, used auto-search fallback")
+
+# ── Debug: dump environment state AFTER .env loading ──
+logger.info("[ENV DEBUG] === After .env loading ===")
+for _v in _auth_vars:
+    _val = os.environ.get(_v)
+    if _val is None:
+        logger.info(f"[ENV DEBUG] {_v} = <NOT IN os.environ>")
+    elif _val == "":
+        logger.info(f"[ENV DEBUG] {_v} = <EMPTY STRING>")
+    else:
+        logger.info(f"[ENV DEBUG] {_v} = {_val[:6]}*** (len={len(_val)})")
 
 STATIC_DIR = ROOT_DIR / "static"
 
