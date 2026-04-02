@@ -1,9 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  Search, Download, Loader2, ExternalLink, Check, GitBranch,
-  Code2, Database, Globe, MessageSquare, Shield, Cpu, FolderOpen, Zap,
-} from "lucide-react";
+import { Search, Download, Loader as Loader2, ExternalLink, Check, GitBranch, Code as Code2, Database, Globe, MessageSquare, Shield, Cpu, FolderOpen, Zap } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +78,7 @@ export function Marketplace({ onInstall }) {
         npm_package: entry.npm_package || "",
         pip_package: entry.pip_package || "",
         credentials_schema: entry.credentials_schema || [],
+        features: entry.features || [],
       });
       await fetchCatalog();
       if (onInstall) onInstall(entry);

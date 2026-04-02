@@ -60,6 +60,9 @@ from mcp_manager import (
     install_server_package, restart_server as restart_mcp_server,
     enrich_from_github,
 )
+from platform_tools import (
+    PLATFORM_TOOL_NAMES, get_platform_tools, execute_platform_tool,
+)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -116,6 +119,7 @@ class AddServerPayload(BaseModel):
     npm_package: str = ""
     pip_package: str = ""
     credentials_schema: list = []  # [{"key": "API_KEY", "label": "API Key", "required": true}]
+    features: list = []  # ["filters", "webhooks", "file_upload"]
 
 class SaveCredentialsPayload(BaseModel):
     credentials: dict = {}  # {"API_KEY": "value", ...}
@@ -137,8 +141,7 @@ tools_router = APIRouter(prefix="/api/tools")
 #  Auth Middleware for Chatwoot routes: accept JWT OR API key
 # ══════════════════════════════════════════════════════════════════
 async def require_jwt_or_api_key(request: Request):
-    """Accept either a valid JWT (dashboard) or a valid API key (external)."""
-    # Try JWT first
+    """Accept either a valid JWT (dashboard) or a valid API key (any server)."""
     token = get_token_from_request(request)
     if token:
         try:
@@ -146,11 +149,10 @@ async def require_jwt_or_api_key(request: Request):
             return
         except HTTPException:
             pass
-    # Try API key
     api_key = get_api_key_from_request(request)
     if api_key:
         key_doc = await db.api_keys.find_one(
-            {"app_name": "chatwoot", "key": api_key, "is_active": True},
+            {"key": api_key, "is_active": True},
             {"_id": 0}
         )
         if key_doc:
@@ -193,23 +195,8 @@ async def logout(response: Response):
 # ══════════════════════════════════════════════════════════════════
 @apps_router.get("", dependencies=[Depends(require_admin)])
 async def list_apps():
-    """List all installed MCP apps (Chatwoot + dynamic servers)."""
-    await _ensure_config_loaded()
-    chatwoot_config = _get_chatwoot_config()
-    key_count = await db.api_keys.count_documents({"app_name": "chatwoot", "is_active": True})
-    apps = [
-        {
-            "name": "chatwoot",
-            "display_name": "Chatwoot",
-            "description": "Customer support & engagement platform",
-            "configured": bool(chatwoot_config.get("chatwoot_url") and chatwoot_config.get("api_token")),
-            "tools_count": len(await _get_tool_definitions()),
-            "active_keys": key_count,
-            "mcp_endpoint": "/api/chatwoot/mcp/sse",
-            "type": "builtin",
-        }
-    ]
-    # Dynamic MCP servers from DB
+    """List all installed MCP servers."""
+    apps = []
     servers = await db.mcp_servers.find({}, {"_id": 0}).to_list(100)
     for srv in servers:
         srv_name = srv["name"]
@@ -228,6 +215,7 @@ async def list_apps():
             "enabled": srv.get("enabled", True),
             "status": "connected" if (running and running.is_connected) else "stopped",
             "github_url": srv.get("github_url", ""),
+            "features": srv.get("features", []),
         })
     return {"apps": apps}
 
@@ -966,6 +954,7 @@ async def add_server(payload: AddServerPayload):
         "pip_package": payload.pip_package,
         "github_url": payload.github_url,
         "credentials_schema": payload.credentials_schema,
+        "features": payload.features,
         "configured": False,
         "enabled": True,
         "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -1138,6 +1127,10 @@ async def list_server_tools(server_name: str):
             "enabled": ct.get("enabled", True),
         })
 
+    for pt in get_platform_tools():
+        if not any(t["name"] == pt["name"] for t in tools):
+            tools.append(pt)
+
     if not tools:
         raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running and has no custom tools")
     return {"tools": tools}
@@ -1145,7 +1138,28 @@ async def list_server_tools(server_name: str):
 
 @servers_router.post("/{server_name}/tools/execute", dependencies=[Depends(require_jwt_or_api_key)])
 async def execute_server_tool(server_name: str, payload: ToolExecutePayload):
-    """Execute a tool on a dynamic MCP server (subprocess or custom)."""
+    """Execute a tool on a dynamic MCP server (platform, subprocess, or custom)."""
+    if payload.tool_name in PLATFORM_TOOL_NAMES:
+        running = get_running_server(server_name)
+        is_connected = bool(running and running.is_connected)
+        all_tools = []
+        if is_connected:
+            all_tools = running.get_tools()
+        custom = await db.custom_tools.find({"app_name": server_name}, {"_id": 0}).to_list(200)
+        for ct in custom:
+            all_tools.append({
+                "name": ct["name"], "description": ct.get("description", ""),
+                "parameters": ct.get("parameters", []),
+                "category": ct.get("category", "custom"), "source": "custom",
+            })
+        try:
+            result = await execute_platform_tool(
+                payload.tool_name, payload.parameters, server_name, all_tools, is_connected,
+            )
+            return {"result": result}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     custom_tool = await db.custom_tools.find_one(
         {"app_name": server_name, "name": payload.tool_name}, {"_id": 0}
     )
@@ -1230,6 +1244,60 @@ async def remove_server(server_name: str):
     await db.server_credentials.delete_one({"server_name": server_name})
     await db.api_keys.delete_many({"app_name": server_name})
     return {"status": "removed"}
+
+
+@servers_router.post("/{server_name}/webhooks/receive")
+async def receive_server_webhook(server_name: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    event = {
+        "server_name": server_name,
+        "event": body.get("event", "unknown"),
+        "data": body,
+        "received_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.webhook_events.insert_one({**event, "_stored": True})
+    count = await db.webhook_events.count_documents({"server_name": server_name})
+    if count > 500:
+        oldest = await db.webhook_events.find({"server_name": server_name}).sort("received_at", 1).limit(count - 500).to_list(count - 500)
+        if oldest:
+            ids = [o["_id"] for o in oldest]
+            await db.webhook_events.delete_many({"_id": {"$in": ids}})
+    for q in webhook_subscribers:
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+    logger.info(f"Webhook received for {server_name}: {event['event']}")
+    return {"status": "received"}
+
+
+@servers_router.get("/{server_name}/webhooks/events", dependencies=[Depends(require_jwt_or_api_key)])
+async def stream_server_webhook_events(server_name: str):
+    queue = asyncio.Queue(maxsize=100)
+    webhook_subscribers.append(queue)
+    async def event_generator():
+        try:
+            while True:
+                event = await queue.get()
+                if event.get("server_name", server_name) == server_name:
+                    yield f"data: {json.dumps(event, default=str)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            webhook_subscribers.remove(queue)
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@servers_router.get("/{server_name}/webhooks/events/history", dependencies=[Depends(require_jwt_or_api_key)])
+async def get_server_webhook_history(server_name: str, limit: int = 50):
+    events = await db.webhook_events.find(
+        {"server_name": server_name}, {"_id": 0, "_stored": 0}
+    ).sort("received_at", -1).limit(limit).to_list(limit)
+    return {"events": events}
 
 
 
@@ -1465,6 +1533,24 @@ async def universal_execute_custom_tool(app_name: str, tool_name: str, payload: 
 # Curated catalog of popular MCP servers
 CURATED_SERVERS = [
     {
+        "slug": "chatwoot",
+        "name": "Chatwoot MCP",
+        "description": "Complete Chatwoot API coverage via MCP. Manage conversations, contacts, messages, agents, inboxes, teams, labels, and more.",
+        "github_url": "",
+        "runtime": "python",
+        "pip_package": "",
+        "command": "python",
+        "args": ["mcp_stdio.py"],
+        "category": "communication",
+        "credentials_schema": [
+            {"key": "CHATWOOT_URL", "label": "Instance URL", "required": True, "hint": "e.g. https://app.chatwoot.com"},
+            {"key": "CHATWOOT_API_TOKEN", "label": "API Token", "required": True, "hint": "Your Chatwoot user access token"},
+            {"key": "CHATWOOT_ACCOUNT_ID", "label": "Account ID", "required": True, "hint": "Numeric account ID"},
+        ],
+        "features": ["filters", "webhooks"],
+        "source": "curated",
+    },
+    {
         "slug": "github",
         "name": "GitHub",
         "description": "Manage repositories, issues, pull requests, and more via the GitHub API",
@@ -1655,8 +1741,6 @@ async def list_catalog(category: str = "", search: str = ""):
     installed_servers = await db.mcp_servers.find({}, {"_id": 0, "name": 1}).to_list(200)
     for s in installed_servers:
         installed_names.add(s["name"])
-    # Also include builtin
-    installed_names.add("chatwoot")
 
     all_entries = []
     for entry in CURATED_SERVERS:

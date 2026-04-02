@@ -24,7 +24,7 @@ const EVENT_COLORS = {
   contact_updated: "bg-[#f97316]/10 text-[#EA580C] border-[#f97316]/30",
 };
 
-export function WebhookEvents() {
+export function WebhookEvents({ serverName = "chatwoot" }) {
   const [events, setEvents] = useState([]);
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(null);
@@ -40,7 +40,7 @@ export function WebhookEvents() {
   useEffect(() => {
     const loadHistory = async () => {
       try {
-        const resp = await axios.get(`${BACKEND_URL}/api/chatwoot/webhooks/events/history?limit=30`, {
+        const resp = await axios.get(`${BACKEND_URL}/api/servers/${serverName}/webhooks/events/history?limit=30`, {
           headers: { Authorization: `Bearer ${localStorage.getItem("mcp_token") || ""}` },
         });
         setEvents(resp.data.events || []);
@@ -49,12 +49,12 @@ export function WebhookEvents() {
       }
     };
     loadHistory();
-  }, []);
+  }, [serverName]);
 
   // SSE connection
   useEffect(() => {
     const token = localStorage.getItem("mcp_token") || "";
-    const url = `${BACKEND_URL}/api/chatwoot/webhooks/events${token ? `?api_key=${token}` : ""}`;
+    const url = `${BACKEND_URL}/api/servers/${serverName}/webhooks/events${token ? `?api_key=${token}` : ""}`;
     const evtSource = new EventSource(url);
     evtSourceRef.current = evtSource;
 
@@ -73,7 +73,7 @@ export function WebhookEvents() {
     return () => {
       evtSource.close();
     };
-  }, []);
+  }, [serverName]);
 
   const clearEvents = () => {
     setEvents([]);

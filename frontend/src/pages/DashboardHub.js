@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { Server, ChevronRight, LogOut, Key, Loader as Loader2, Plus, Play, Square, Trash2, GitBranch, Store, Share2 } from "lucide-react";
+import { Server, LogOut, Key, Loader as Loader2, Plus, Play, Square, Trash2, GitBranch, Store, Share2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddServerModal } from "@/components/AddServerModal";
@@ -152,50 +152,28 @@ export default function DashboardHub() {
                     onClick={() => navigate(`/dashboard/${app.name}`)}
                     data-testid={`app-card-${app.name}`}
                   >
-                    <div className={`w-12 h-12 flex items-center justify-center flex-shrink-0 border ${
-                      app.type === "dynamic"
-                        ? "bg-[#0A0A0A]/5 border-[#0A0A0A]/10"
-                        : "bg-[#002FA7]/5 border-[#002FA7]/10"
-                    }`}>
-                      {app.type === "dynamic"
-                        ? <GitBranch className="w-5 h-5 text-[#0A0A0A]" />
-                        : <Server className="w-6 h-6 text-[#002FA7]" />
-                      }
+                    <div className="w-12 h-12 flex items-center justify-center flex-shrink-0 border bg-[#0A0A0A]/5 border-[#0A0A0A]/10">
+                      <GitBranch className="w-5 h-5 text-[#0A0A0A]" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <h3 className="font-bold text-[#0A0A0A] text-base">{app.display_name}</h3>
-                        {app.type === "dynamic" && (
-                          <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-[#666] border-[#CCC]">
-                            {app.runtime}
-                          </Badge>
-                        )}
-                        {app.type === "dynamic" ? (
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
-                              app.status === "connected"
-                                ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
-                                : app.configured
-                                  ? "text-[#FFCC00] border-[#FFCC00]/30 bg-[#FFCC00]/5"
-                                  : "text-[#999] border-[#999]/30 bg-[#999]/5"
-                            }`}
-                            data-testid={`server-status-${app.name}`}
-                          >
-                            {app.status === "connected" ? "Running" : app.configured ? "Stopped" : "Not configured"}
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
-                              app.configured
-                                ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
+                        <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-[#666] border-[#CCC]">
+                          {app.runtime}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
+                            app.status === "connected"
+                              ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
+                              : app.configured
+                                ? "text-[#FFCC00] border-[#FFCC00]/30 bg-[#FFCC00]/5"
                                 : "text-[#999] border-[#999]/30 bg-[#999]/5"
-                            }`}
-                          >
-                            {app.configured ? "Connected" : "Not configured"}
-                          </Badge>
-                        )}
+                          }`}
+                          data-testid={`server-status-${app.name}`}
+                        >
+                          {app.status === "connected" ? "Running" : app.configured ? "Stopped" : "Not configured"}
+                        </Badge>
                       </div>
                       <p className="text-sm text-[#666] truncate">{app.description}</p>
                       <div className="flex items-center gap-4 mt-2 text-xs text-[#999] font-mono">
@@ -208,64 +186,59 @@ export default function DashboardHub() {
                       </div>
                     </div>
 
-                    {/* Action buttons for dynamic servers */}
-                    {app.type === "dynamic" ? (
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <Button
-                          variant="ghost" size="icon"
-                          className="w-8 h-8 text-[#999] hover:text-[#002FA7] hover:bg-[#002FA7]/5 rounded-none"
-                          onClick={(e) => handlePublish(e, app.name)}
-                          disabled={publishing === app.name}
-                          data-testid={`share-server-${app.name}`}
-                          title="Share to Marketplace"
-                        >
-                          {publishing === app.name
-                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <Share2 className="w-3.5 h-3.5" />}
-                        </Button>
-                        {app.status === "connected" ? (
-                          <Button
-                            variant="ghost" size="icon"
-                            className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
-                            onClick={(e) => handleServerAction(e, app.name, "stop")}
-                            disabled={actionLoading[app.name] === "stop"}
-                            data-testid={`stop-server-${app.name}`}
-                            title="Stop server"
-                          >
-                            {actionLoading[app.name] === "stop"
-                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              : <Square className="w-3.5 h-3.5" />}
-                          </Button>
-                        ) : app.configured ? (
-                          <Button
-                            variant="ghost" size="icon"
-                            className="w-8 h-8 text-[#999] hover:text-[#00E559] hover:bg-[#00E559]/5 rounded-none"
-                            onClick={(e) => handleServerAction(e, app.name, "start")}
-                            disabled={actionLoading[app.name] === "start"}
-                            data-testid={`start-server-${app.name}`}
-                            title="Start server"
-                          >
-                            {actionLoading[app.name] === "start"
-                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              : <Play className="w-3.5 h-3.5" />}
-                          </Button>
-                        ) : null}
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-8 h-8 text-[#999] hover:text-[#002FA7] hover:bg-[#002FA7]/5 rounded-none"
+                        onClick={(e) => handlePublish(e, app.name)}
+                        disabled={publishing === app.name}
+                        data-testid={`share-server-${app.name}`}
+                        title="Share to Marketplace"
+                      >
+                        {publishing === app.name
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Share2 className="w-3.5 h-3.5" />}
+                      </Button>
+                      {app.status === "connected" ? (
                         <Button
                           variant="ghost" size="icon"
                           className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
-                          onClick={(e) => handleServerAction(e, app.name, "delete")}
-                          disabled={!!actionLoading[app.name]}
-                          data-testid={`delete-server-${app.name}`}
-                          title="Remove server"
+                          onClick={(e) => handleServerAction(e, app.name, "stop")}
+                          disabled={actionLoading[app.name] === "stop"}
+                          data-testid={`stop-server-${app.name}`}
+                          title="Stop server"
                         >
-                          {actionLoading[app.name] === "delete"
+                          {actionLoading[app.name] === "stop"
                             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            : <Trash2 className="w-3.5 h-3.5" />}
+                            : <Square className="w-3.5 h-3.5" />}
                         </Button>
-                      </div>
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-[#CCC] group-hover:text-[#002FA7] transition-colors flex-shrink-0" />
-                    )}
+                      ) : app.configured ? (
+                        <Button
+                          variant="ghost" size="icon"
+                          className="w-8 h-8 text-[#999] hover:text-[#00E559] hover:bg-[#00E559]/5 rounded-none"
+                          onClick={(e) => handleServerAction(e, app.name, "start")}
+                          disabled={actionLoading[app.name] === "start"}
+                          data-testid={`start-server-${app.name}`}
+                          title="Start server"
+                        >
+                          {actionLoading[app.name] === "start"
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Play className="w-3.5 h-3.5" />}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost" size="icon"
+                        className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
+                        onClick={(e) => handleServerAction(e, app.name, "delete")}
+                        disabled={!!actionLoading[app.name]}
+                        data-testid={`delete-server-${app.name}`}
+                        title="Remove server"
+                      >
+                        {actionLoading[app.name] === "delete"
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Trash2 className="w-3.5 h-3.5" />}
+                      </Button>
+                    </div>
                   </div>
                 ))}
 
