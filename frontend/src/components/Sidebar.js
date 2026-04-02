@@ -1,23 +1,5 @@
 import { useState } from "react";
-import {
-  Settings,
-  Wifi,
-  WifiOff,
-  Loader2,
-  Server,
-  Radio,
-  ChevronDown,
-  Save,
-  Eye,
-  EyeOff,
-  ArrowLeft,
-  LogOut,
-  Play,
-  Square,
-  RefreshCw,
-  Plus,
-  GitBranch,
-} from "lucide-react";
+import { Settings, Wifi, WifiOff, Loader as Loader2, Server, Radio, ChevronDown, Save, Eye, EyeOff, ArrowLeft, LogOut, Play, Square, RefreshCw, Plus, GitBranch } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
