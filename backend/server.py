@@ -197,10 +197,19 @@ async def logout(response: Response):
 async def list_apps():
     """List all installed MCP servers."""
     apps = []
-    servers = await db.mcp_servers.find({}, {"_id": 0}).to_list(100)
+    try:
+        servers = await db.mcp_servers.find({}, {"_id": 0}).to_list(100)
+    except Exception as e:
+        logger.warning(f"Failed to fetch installed servers: {e}")
+        return {"apps": []}
     for srv in servers:
-        srv_name = srv["name"]
-        srv_keys = await db.api_keys.count_documents({"app_name": srv_name, "is_active": True})
+        srv_name = srv.get("name", "")
+        if not srv_name:
+            continue
+        try:
+            srv_keys = await db.api_keys.count_documents({"app_name": srv_name, "is_active": True})
+        except Exception:
+            srv_keys = 0
         running = get_running_server(srv_name)
         apps.append({
             "name": srv_name,
@@ -1239,7 +1248,10 @@ async def save_server_output_format(server_name: str, payload: dict):
 @servers_router.delete("/{server_name}", dependencies=[Depends(require_admin)])
 async def remove_server(server_name: str):
     """Remove a server and clean up."""
-    await stop_mcp_server(server_name)
+    try:
+        await stop_mcp_server(server_name)
+    except Exception as e:
+        logger.warning(f"Failed to stop server process '{server_name}': {e}")
     await db.mcp_servers.delete_one({"name": server_name})
     await db.server_credentials.delete_one({"server_name": server_name})
     await db.api_keys.delete_many({"app_name": server_name})
@@ -1727,20 +1739,42 @@ CURATED_SERVERS = [
         ],
         "source": "curated",
     },
+    {
+        "slug": "firecrawl",
+        "name": "Firecrawl",
+        "description": "Web scraping and crawling API — turn websites into LLM-ready markdown data",
+        "github_url": "https://github.com/mendableai/firecrawl-mcp-server",
+        "runtime": "node",
+        "npm_package": "firecrawl-mcp",
+        "command": "npx",
+        "args": ["-y", "firecrawl-mcp"],
+        "category": "search",
+        "credentials_schema": [
+            {"key": "FIRECRAWL_API_KEY", "label": "Firecrawl API Key", "required": True, "hint": "Get your key at firecrawl.dev"},
+        ],
+        "source": "curated",
+    },
 ]
 
 
 @marketplace_router.get("/catalog")
 async def list_catalog(category: str = "", search: str = ""):
     """List all marketplace servers (curated + community)."""
-    # Combine curated + community from DB
-    community = await db.marketplace.find({}, {"_id": 0}).to_list(200)
+    community = []
+    try:
+        community = await db.marketplace.find({}, {"_id": 0}).to_list(200)
+    except Exception as e:
+        logger.warning(f"Failed to fetch community marketplace entries: {e}")
 
-    # Get installed server names to mark them
     installed_names = set()
-    installed_servers = await db.mcp_servers.find({}, {"_id": 0, "name": 1}).to_list(200)
-    for s in installed_servers:
-        installed_names.add(s["name"])
+    try:
+        installed_servers = await db.mcp_servers.find({}, {"_id": 0, "name": 1}).to_list(200)
+        for s in installed_servers:
+            name = s.get("name", "")
+            if name:
+                installed_names.add(name)
+    except Exception as e:
+        logger.warning(f"Failed to fetch installed servers: {e}")
 
     all_entries = []
     for entry in CURATED_SERVERS:
@@ -1751,14 +1785,12 @@ async def list_catalog(category: str = "", search: str = ""):
         e = {**entry, "installed": entry.get("slug", entry.get("name", "")) in installed_names}
         all_entries.append(e)
 
-    # Filter
     if category:
         all_entries = [e for e in all_entries if e.get("category", "") == category]
     if search:
         q = search.lower()
         all_entries = [e for e in all_entries if q in e.get("name", "").lower() or q in e.get("description", "").lower() or q in e.get("slug", "").lower()]
 
-    # Deduplicate by slug
     seen = set()
     unique = []
     for e in all_entries:
@@ -1935,15 +1967,19 @@ async def startup():
         if url and token:
             set_runtime_config(url, token, account_id)
 
-    # Auto-start enabled dynamic MCP servers
+    # Auto-start enabled dynamic MCP servers (staggered to reduce CPU spike)
     try:
         servers = await db.mcp_servers.find({"enabled": True}, {"_id": 0}).to_list(50)
+        started = 0
         for srv in servers:
             if not srv.get("configured"):
                 continue
             try:
+                srv_name = srv.get("name", "")
+                if not srv_name:
+                    continue
                 creds_doc = await db.server_credentials.find_one(
-                    {"server_name": srv["name"]}, {"_id": 0}
+                    {"server_name": srv_name}, {"_id": 0}
                 )
                 env_vars = {}
                 if creds_doc and creds_doc.get("credentials"):
@@ -1953,15 +1989,18 @@ async def startup():
                         except Exception:
                             env_vars[k] = v
                 server_config = {
-                    "name": srv["name"],
-                    "command": srv["command"],
+                    "name": srv_name,
+                    "command": srv.get("command", ""),
                     "args": srv.get("args", []),
                     "env_vars": env_vars,
                     "runtime": srv.get("runtime", "node"),
                 }
                 await start_mcp_server(server_config)
+                started += 1
+                if started < len(servers):
+                    await asyncio.sleep(1)
             except Exception as e:
-                logger.warning(f"Failed to auto-start {srv['name']}: {e}")
+                logger.warning(f"Failed to auto-start {srv.get('name', '?')}: {e}")
     except Exception as e:
         logger.warning(f"Server auto-start deferred: {e}")
 

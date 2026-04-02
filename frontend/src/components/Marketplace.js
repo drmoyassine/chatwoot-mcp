@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Search, Download, Loader as Loader2, ExternalLink, Check, GitBranch, Code as Code2, Database, Globe, MessageSquare, Shield, Cpu, FolderOpen, Zap } from "lucide-react";
+import { Search, Download, Loader as Loader2, ExternalLink, Check, GitBranch, Code as Code2, Database, Globe, MessageSquare, Shield, Cpu, FolderOpen, Zap, TriangleAlert as AlertTriangle, RefreshCw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,16 +39,19 @@ export function Marketplace({ onInstall }) {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [installing, setInstalling] = useState(null);
+  const [error, setError] = useState(null);
 
   const api = useCallback(() => axiosAuth(), [axiosAuth]);
 
   const fetchCatalog = useCallback(async () => {
+    setError(null);
     try {
       const resp = await api().get("/api/marketplace/catalog");
       setCatalog(resp.data.catalog || []);
       setCategories(resp.data.categories || []);
     } catch (e) {
       console.error("Failed to fetch marketplace", e);
+      setError("Failed to load marketplace catalog. The server may be restarting.");
     } finally {
       setLoading(false);
     }
@@ -141,6 +144,22 @@ export function Marketplace({ onInstall }) {
           ))}
         </div>
       </div>
+
+      {error && (
+        <div className="flex items-center gap-3 p-4 mb-6 border border-[#DC2626]/20 bg-[#DC2626]/5">
+          <AlertTriangle className="w-5 h-5 text-[#DC2626] flex-shrink-0" />
+          <p className="text-sm text-[#DC2626] font-mono flex-1">{error}</p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-none text-[10px] font-mono h-7 px-3 border-[#DC2626]/30 text-[#DC2626] hover:bg-[#DC2626]/10"
+            onClick={() => { setLoading(true); fetchCatalog(); }}
+          >
+            <RefreshCw className="w-3 h-3 mr-1" />
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
