@@ -1,24 +1,25 @@
 # PRD - MCP Hub
 
 ## Original Problem Statement
-Build a complete MCP (Model Context Protocol) server for Chatwoot Application APIs. Evolved into a multi-MCP platform ("MCP Hub") with authentication, per-app API keys, tool customization, and a dashboard for managing installed MCP servers. Users can dynamically add external MCP servers via GitHub repository URLs, with credentials encrypted at rest.
+Build a complete MCP (Model Context Protocol) server for Chatwoot Application APIs. Evolved into a multi-MCP platform ("MCP Hub") with authentication, per-app API keys, tool customization, a dashboard for managing installed MCP servers, a marketplace of curated + community servers, and per-server management dashboards.
 
 ## Long-Term Vision
 A no-code MCP server development platform. Users point to a Swagger/OpenAPI spec -> parse endpoints -> select tools & categories -> auto-generate MCP server -> configure auth -> serve at `/api/{app_name}/mcp/sse`.
 
 ## Architecture
 - **Backend**: FastAPI (Python) with JWT auth, per-app API key management, FastMCP server, MongoDB
-- **Frontend**: React + Tailwind + Shadcn UI — Login -> Dashboard Hub -> App-specific dashboards
+- **Frontend**: React + Tailwind + Shadcn UI — Login -> Dashboard Hub (Installed + Marketplace) -> App-specific dashboards
 - **MCP Transports**: SSE (namespaced at `/api/{app_name}/mcp/sse`) + stdio
-- **Database**: MongoDB (config, API keys, webhook events, tool overrides, custom tools, mcp_servers, server_credentials)
+- **Database**: MongoDB (config, API keys, webhook events, tool overrides, custom tools, mcp_servers, server_credentials, marketplace)
 - **Auth**: JWT for dashboard, per-app API keys for external access
 - **Encryption**: Fernet (AES) for all 3rd-party credentials at rest
 
 ## Route Structure
 ```
 /login                          -> Login page
-/dashboard                      -> MCP Hub (list of installed servers)
+/dashboard                      -> MCP Hub (Installed tab + Marketplace tab)
 /dashboard/chatwoot             -> Chatwoot control room
+/dashboard/:serverName          -> Dynamic server dashboard (tools, creds, API keys)
 
 /api/auth/login|me|logout       -> Dashboard authentication
 /api/apps                       -> List installed MCP apps (builtin + dynamic)
@@ -33,39 +34,43 @@ A no-code MCP server development platform. Users point to a Swagger/OpenAPI spec
 /api/servers/{name}/toggle      -> Enable/disable server
 /api/servers/{name}/tools       -> List tools from running server
 /api/servers/{name}/tools/execute -> Execute tool on running server
+/api/marketplace/catalog        -> List curated + community servers
+/api/marketplace/publish        -> Share installed server to community
+/api/marketplace/{slug}         -> Remove from marketplace
 ```
 
 ## What's Been Implemented
 
 ### Core (2026-03-28)
 - 55 MCP Tools across 12+ categories (Chatwoot API coverage)
-- Discovery tools: `start_here`, `list_tools`, `search_tools` with TOON compression
-- Frontend: Tool Explorer, Test Terminal (Live Testing + API Docs tabs), Filter Builder, Webhook Events
-- File attachment support, webhook SSE streaming, Docker deployment
+- Discovery tools, Filter Builder, Webhook Events, File attachments
 
 ### Auth & Platform (2026-03-29)
-- Dashboard Authentication: Admin email/password from env vars -> JWT
-- Login page, Dashboard Hub, route protection
-- Per-app API keys: Create, list (masked), revoke via UI and REST API
-- Dual auth on MCP endpoints: JWT OR API key
-- Route namespacing: `/api/chatwoot/*`
+- JWT admin auth, per-app API keys, route protection, dual auth on MCP endpoints
 
 ### Tool Customization (2026-04-01)
-- Edit existing tool parameters, add new parameters, create new tools via JSON/cURL
-- Tool on/off toggle, cURL parser, enum support
-- Persistence: tool_overrides and custom_tools collections
-
-### Docker Fixes (2026-04-01)
-- Fixed Easypanel env var injection in docker-compose.yml
+- Edit/add params, create tools via JSON/cURL, toggle on/off
 
 ### Multi-Server MCP Hub (2026-04-01 - 2026-04-02)
-- **Backend infrastructure**: Node.js runtime in Dockerfile, `crypto.py` (Fernet AES encryption), `mcp_manager.py` (subprocess lifecycle management via MCP stdio client)
-- **GitHub URL parser**: Parses `github.com/org/repo/tree/branch/path` to detect npm/pip packages and run commands
-- **Server CRUD API**: Full REST API for adding, configuring, starting, stopping, and removing dynamic MCP servers
-- **Encrypted credentials**: All 3rd-party API keys encrypted at rest in `server_credentials` collection
-- **Frontend - AddServerModal**: Multi-step modal (URL input -> preview detected package -> install -> configure credentials)
-- **Frontend - DashboardHub wiring**: "+ Add MCP Server" button, dynamic server cards with status badges (Running/Stopped/Not configured), runtime tags, and start/stop/delete action buttons
-- **Auto-start**: Enabled servers with credentials auto-start on application startup
+- Backend: Node.js runtime, `crypto.py` encryption, `mcp_manager.py` subprocess manager
+- GitHub URL parser, server CRUD API, encrypted credentials
+- AddServerModal (multi-step: URL -> preview -> install -> credentials)
+- DashboardHub wiring with dynamic server cards (status badges, start/stop/delete)
+
+### Server Dashboard (2026-04-02)
+- `/dashboard/:serverName` route with `ServerDashboard.js`
+- Sidebar: server info, status, start/stop/restart controls, credential management
+- Main area: discovered tools list with test terminal, API key management
+- Tool execution against running MCP subprocess
+
+### Marketplace (2026-04-02)
+- 12 curated MCP servers: GitHub, GitLab, Slack, PostgreSQL, Brave Search, Filesystem, Memory, Fetch, Puppeteer, Google Drive, Sentry, SQLite
+- Category filtering (developer, communication, database, search, utility, automation, storage, monitoring)
+- Search functionality
+- One-click install from marketplace
+- "Installed" badge on already-installed servers
+- Community sharing: "Share to Marketplace" button on dynamic servers
+- Publish/unpublish API endpoints
 
 ## Key DB Collections
 - `mcp_config`: Chatwoot connection config
@@ -73,8 +78,9 @@ A no-code MCP server development platform. Users point to a Swagger/OpenAPI spec
 - `webhook_events`: Webhook event history
 - `tool_overrides`: Parameter edits/additions on builtin tools
 - `custom_tools`: Fully custom tool definitions
-- `mcp_servers`: Registered dynamic MCP servers (name, runtime, command, args, credentials_schema)
+- `mcp_servers`: Registered dynamic MCP servers
 - `server_credentials`: Encrypted credential storage per server
+- `marketplace`: Community-published server entries
 
 ## Code Architecture
 ```
@@ -82,30 +88,30 @@ A no-code MCP server development platform. Users point to a Swagger/OpenAPI spec
 ├── backend/
 │   ├── auth.py                 # JWT helpers, API key verification
 │   ├── chatwoot_client.py      # HTTPX Async client for Chatwoot APIs
-│   ├── crypto.py               # Fernet AES encryption for credentials
+│   ├── crypto.py               # Fernet AES encryption
 │   ├── mcp_manager.py          # MCP subprocess manager + GitHub URL parser
-│   ├── mcp_tools.py            # FastMCP server, tool definitions, TOON
-│   ├── server.py               # FastAPI app, all routers, MCP SSE
-│   ├── tests/                  # Pytest tests
-│   ├── requirements.txt
-│   └── requirements.docker.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.js              # Router with auth guards
-│   │   ├── contexts/AuthContext.js
-│   │   ├── pages/Login.js, DashboardHub.js, ChatwootDashboard.js
-│   │   └── components/
-│   │       ├── AddServerModal.js  # Multi-step GitHub URL -> install flow
-│   │       ├── ApiKeyManager.js, ParamEditModal.js, CreateToolModal.js
-│   │       ├── ProtectedRoute.js, Sidebar.js, ToolExplorer.js
-│   │       ├── TestTerminal.js, FilterBuilder.js, WebhookEvents.js
-├── Dockerfile, docker-compose.yml
+│   ├── mcp_tools.py            # FastMCP server, tool definitions
+│   ├── server.py               # FastAPI app, all routers, marketplace catalog
+│   └── tests/                  # Pytest tests
+├── frontend/src/
+│   ├── App.js                  # Router (login, hub, chatwoot, :serverName)
+│   ├── pages/
+│   │   ├── Login.js
+│   │   ├── DashboardHub.js     # Installed + Marketplace tabs
+│   │   ├── ChatwootDashboard.js
+│   │   └── ServerDashboard.js  # Dynamic server management
+│   └── components/
+│       ├── AddServerModal.js   # GitHub URL install flow
+│       ├── Marketplace.js      # Catalog grid with search/filter/install
+│       ├── ApiKeyManager.js    # Reusable API key CRUD
+│       ├── ToolExplorer.js, TestTerminal.js, FilterBuilder.js
+│       ├── ParamEditModal.js, CreateToolModal.js
+│       ├── WebhookEvents.js, Sidebar.js, ProtectedRoute.js
 ```
 
 ## Prioritized Backlog
 
 ### P1 (Important)
-- Detail/management page for dynamic MCP servers (view tools, manage credentials, start/stop, API keys)
 - Claude Desktop / Cursor integration guide
 
 ### P2 (Nice to Have)
