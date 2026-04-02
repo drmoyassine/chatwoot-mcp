@@ -45,9 +45,11 @@ function FilterTab({ executeTool, connectionStatus }) {
         <div className="relative z-10 px-4 py-3 border-b border-[#222] flex items-center justify-between">
           <span className="font-mono text-sm font-semibold text-[#00E559] uppercase tracking-wider">Filter Results</span>
           {elapsed !== null && <span className="font-mono text-[10px] text-[#666]">{elapsed}ms</span>}
+          }
         </div>
         <div className="relative z-10 flex-1 overflow-auto p-4">
           {loading && <p className="font-mono text-xs text-[#FFCC00] animate-pulse">FILTERING...</p>}
+          }
           {error && (
             <div className="p-3 border border-[#FF2A2A]/30 bg-[#FF2A2A]/5">
               <p className="font-mono text-xs text-[#FF8A8A] whitespace-pre-wrap">{error}</p>
@@ -338,6 +340,7 @@ export default function ChatwootDashboard() {
           categories={categories}
           onClose={() => setShowCreateTool(false)}
           onCreated={fetchTools}
+          appName="chatwoot"
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Upload, Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { X, Upload, Loader as Loader2, Plus, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,7 +7,7 @@ import { ParamEditModal } from "./ParamEditModal";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
-export function CreateToolModal({ categories, onClose, onCreated }) {
+export function CreateToolModal({ categories, onClose, onCreated, appName = "chatwoot" }) {
   const { axiosAuth } = useAuth();
   const [step, setStep] = useState("input"); // input | preview
   const [schema, setSchema] = useState("");
@@ -26,7 +26,7 @@ export function CreateToolModal({ categories, onClose, onCreated }) {
     setParsing(true);
     setParseError("");
     try {
-      const resp = await api.post("/api/chatwoot/tools/parse-schema", { schema: schema.trim() });
+      const resp = await api.post("/api/tools/parse-schema", { schema: schema.trim() });
       setTool(resp.data.tool);
       setStep("preview");
     } catch (e) {
@@ -41,12 +41,16 @@ export function CreateToolModal({ categories, onClose, onCreated }) {
     setSaving(true);
     try {
       const category = newCategory.trim() || tool.category || "custom";
-      await api.post("/api/chatwoot/tools/create", {
+      await api.post(`/api/tools/${appName}/create`, {
         name: tool.name,
         description: tool.description,
         category,
         parameters: tool.parameters,
         source_schema: schema,
+        app_name: appName,
+        method: tool.method || "",
+        path: tool.path || "",
+        base_url: tool.base_url || "",
       });
       onCreated();
       onClose();
@@ -93,16 +97,16 @@ export function CreateToolModal({ categories, onClose, onCreated }) {
           {step === "input" ? (
             <div className="p-5 space-y-4">
               <p className="text-sm text-[#666]">
-                Paste a <strong>cURL command</strong> or <strong>JSON request body</strong> from API documentation.
-                Auth headers and account_id will be automatically stripped.
+                Paste a <strong>cURL command</strong> or <strong>JSON request body</strong> from any API documentation.
+                Parameters will be automatically extracted.
               </p>
               <textarea
                 value={schema}
                 onChange={(e) => setSchema(e.target.value)}
-                placeholder={`curl --request PUT \\
-  --url https://app.chatwoot.com/api/v1/accounts/{account_id}/contacts/{id} \\
+                placeholder={`curl --request POST \\
+  --url https://api.example.com/v1/resources/{id} \\
   --header 'Content-Type: application/json' \\
-  --data '{ "name": "Alice", "email": "alice@acme.inc" }'`}
+  --data '{ "name": "Example", "value": 42 }'`}
                 className="w-full h-48 border border-[#E5E5E5] p-3 font-mono text-xs bg-[#FAFAFA] focus:border-[#002FA7] focus:outline-none resize-none"
                 data-testid="schema-input"
               />
@@ -170,31 +174,42 @@ export function CreateToolModal({ categories, onClose, onCreated }) {
                 </div>
               </div>
 
-              {/* Method & Path */}
+              {/* Method & URL */}
               {tool.method && (
-                <div className="flex gap-2">
-                  <div className="w-24">
-                    <label className="text-xs font-medium text-[#666] mb-1.5 block uppercase tracking-wider">Method</label>
-                    <select
-                      value={tool.method}
-                      onChange={(e) => setTool((t) => ({ ...t, method: e.target.value }))}
-                      className="w-full border border-[#E5E5E5] px-3 py-2 font-mono text-sm bg-white focus:border-[#002FA7] focus:outline-none"
-                      data-testid="tool-method-select"
-                    >
-                      {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs font-medium text-[#666] mb-1.5 block uppercase tracking-wider">API Path</label>
-                    <Input
-                      value={tool.path}
-                      onChange={(e) => setTool((t) => ({ ...t, path: e.target.value }))}
-                      placeholder="/contacts/{id}"
-                      className="rounded-none border-[#E5E5E5] font-mono text-sm"
-                      data-testid="tool-path-input"
-                    />
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <div className="w-24">
+                      <label className="text-xs font-medium text-[#666] mb-1.5 block uppercase tracking-wider">Method</label>
+                      <select
+                        value={tool.method}
+                        onChange={(e) => setTool((t) => ({ ...t, method: e.target.value }))}
+                        className="w-full border border-[#E5E5E5] px-3 py-2 font-mono text-sm bg-white focus:border-[#002FA7] focus:outline-none"
+                        data-testid="tool-method-select"
+                      >
+                        {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs font-medium text-[#666] mb-1.5 block uppercase tracking-wider">
+                        {tool.base_url ? "Full URL" : "API Path"}
+                      </label>
+                      <Input
+                        value={tool.base_url || tool.path}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val.startsWith("http")) {
+                            setTool((t) => ({ ...t, base_url: val, path: new URL(val).pathname }));
+                          } else {
+                            setTool((t) => ({ ...t, path: val, base_url: "" }));
+                          }
+                        }}
+                        placeholder="https://api.example.com/v1/resources/{id}"
+                        className="rounded-none border-[#E5E5E5] font-mono text-sm"
+                        data-testid="tool-path-input"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

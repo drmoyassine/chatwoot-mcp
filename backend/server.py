@@ -99,7 +99,11 @@ class CreateToolPayload(BaseModel):
     description: str = ""
     category: str = "custom"
     parameters: list = []
-    source_schema: str = ""  # Original pasted cURL/JSON
+    source_schema: str = ""
+    app_name: str = "chatwoot"
+    method: str = ""
+    path: str = ""
+    base_url: str = ""
 
 class AddServerPayload(BaseModel):
     github_url: str = ""
@@ -126,6 +130,7 @@ apps_router = APIRouter(prefix="/api/apps")
 chatwoot_router = APIRouter(prefix="/api/chatwoot")
 servers_router = APIRouter(prefix="/api/servers")
 marketplace_router = APIRouter(prefix="/api/marketplace")
+tools_router = APIRouter(prefix="/api/tools")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1090,16 +1095,41 @@ async def toggle_server(server_name: str, payload: dict):
 
 @servers_router.get("/{server_name}/tools", dependencies=[Depends(require_jwt_or_api_key)])
 async def list_server_tools(server_name: str):
-    """List tools for a dynamic MCP server."""
+    """List tools for a dynamic MCP server (discovered + custom)."""
+    tools = []
     running = get_running_server(server_name)
-    if not running or not running.is_connected:
-        raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running")
-    return {"tools": running.get_tools()}
+    if running and running.is_connected:
+        for t in running.get_tools():
+            t["source"] = t.get("source", "builtin")
+            tools.append(t)
+
+    custom_tools = await db.custom_tools.find({"app_name": server_name}, {"_id": 0}).to_list(200)
+    for ct in custom_tools:
+        tools.append({
+            "name": ct["name"],
+            "description": ct.get("description", ""),
+            "parameters": ct.get("parameters", []),
+            "category": ct.get("category", "custom"),
+            "source": "custom",
+            "enabled": ct.get("enabled", True),
+        })
+
+    if not tools:
+        raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running and has no custom tools")
+    return {"tools": tools}
 
 
 @servers_router.post("/{server_name}/tools/execute", dependencies=[Depends(require_jwt_or_api_key)])
 async def execute_server_tool(server_name: str, payload: ToolExecutePayload):
-    """Execute a tool on a dynamic MCP server."""
+    """Execute a tool on a dynamic MCP server (subprocess or custom)."""
+    custom_tool = await db.custom_tools.find_one(
+        {"app_name": server_name, "name": payload.tool_name}, {"_id": 0}
+    )
+    if custom_tool:
+        return await universal_execute_custom_tool(
+            server_name, payload.tool_name, {"parameters": payload.parameters}
+        )
+
     running = get_running_server(server_name)
     if not running or not running.is_connected:
         raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running")
@@ -1108,6 +1138,27 @@ async def execute_server_tool(server_name: str, payload: ToolExecutePayload):
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@servers_router.get("/{server_name}/output-format", dependencies=[Depends(require_admin)])
+async def get_server_output_format(server_name: str):
+    srv = await db.mcp_servers.find_one({"name": server_name}, {"_id": 0, "output_format": 1})
+    if not srv:
+        raise HTTPException(status_code=404, detail="Server not found")
+    return {"output_format": srv.get("output_format", "json")}
+
+
+@servers_router.post("/{server_name}/output-format", dependencies=[Depends(require_admin)])
+async def save_server_output_format(server_name: str, payload: dict):
+    fmt = payload.get("output_format", "json")
+    if fmt not in ("json", "toon"):
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'json' or 'toon'.")
+    result = await db.mcp_servers.update_one(
+        {"name": server_name}, {"$set": {"output_format": fmt}}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Server not found")
+    return {"output_format": fmt}
 
 
 @servers_router.delete("/{server_name}", dependencies=[Depends(require_admin)])
@@ -1119,6 +1170,231 @@ async def remove_server(server_name: str):
     await db.api_keys.delete_many({"app_name": server_name})
     return {"status": "removed"}
 
+
+
+# ══════════════════════════════════════════════════════════════════
+#  UNIVERSAL CUSTOM TOOLS  (/api/tools) — works for any server
+# ══════════════════════════════════════════════════════════════════
+
+def _parse_schema_universal(text: str) -> dict:
+    import shlex
+
+    tool = {"name": "", "description": "", "parameters": [], "method": "POST", "path": "", "base_url": ""}
+
+    if text.strip().startswith("curl"):
+        text_clean = text.replace("\\\n", " ").replace("\\\r\n", " ")
+        try:
+            parts = shlex.split(text_clean)
+        except ValueError:
+            parts = text_clean.split()
+
+        method = "GET"
+        url = ""
+        data_str = ""
+
+        i = 0
+        while i < len(parts):
+            p = parts[i]
+            if p in ("-X", "--request") and i + 1 < len(parts):
+                method = parts[i + 1].upper()
+                i += 2
+            elif p in ("-H", "--header") and i + 1 < len(parts):
+                i += 2
+            elif p in ("-d", "--data", "--data-raw") and i + 1 < len(parts):
+                data_str = parts[i + 1]
+                i += 2
+            elif p.startswith("http"):
+                url = p
+                i += 1
+            elif p == "--url" and i + 1 < len(parts):
+                url = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        tool["method"] = method
+
+        if url:
+            tool["base_url"] = url
+
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            path = parsed.path
+            if path:
+                tool["path"] = path
+
+            path_parts = [p for p in path.split("/") if p and not p.startswith("{")]
+            method_prefix = {"GET": "get", "POST": "create", "PUT": "update", "PATCH": "update", "DELETE": "delete"}.get(method, "run")
+            if path_parts:
+                resource = path_parts[-1].rstrip("s") if len(path_parts[-1]) > 3 else path_parts[-1]
+                tool["name"] = f"{method_prefix}_{resource}"
+
+        if data_str:
+            try:
+                data_str_clean = data_str.strip().strip("'\"")
+                body = json.loads(data_str_clean)
+                tool["parameters"] = _extract_params_from_json(body)
+            except json.JSONDecodeError:
+                pass
+
+        if tool["path"]:
+            path_params = re.findall(r'\{(\w+)\}', tool["path"])
+            existing_names = {p["name"] for p in tool["parameters"]}
+            for pp in path_params:
+                if pp not in existing_names:
+                    tool["parameters"].insert(0, {
+                        "name": pp, "type": "string", "required": True,
+                        "description": f"Path parameter: {pp}", "enum_options": [],
+                    })
+    else:
+        try:
+            body = json.loads(text)
+            tool["parameters"] = _extract_params_from_json(body)
+            tool["name"] = "new_tool"
+        except json.JSONDecodeError:
+            raise ValueError("Could not parse as cURL or JSON")
+
+    return tool
+
+
+@tools_router.post("/parse-schema", dependencies=[Depends(require_admin)])
+async def universal_parse_schema(payload: dict):
+    schema_text = payload.get("schema", "").strip()
+    if not schema_text:
+        raise HTTPException(status_code=400, detail="Schema text required")
+    try:
+        tool_def = _parse_schema_universal(schema_text)
+        return {"tool": tool_def}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse schema: {str(e)}")
+
+
+@tools_router.post("/{app_name}/create", dependencies=[Depends(require_admin)])
+async def universal_create_custom_tool(app_name: str, payload: CreateToolPayload):
+    existing_custom = await db.custom_tools.find_one(
+        {"app_name": app_name, "name": payload.name}, {"_id": 0}
+    )
+    if app_name == "chatwoot":
+        tool_manager = mcp_server_instance._tool_manager
+        if payload.name in tool_manager._tools or existing_custom:
+            raise HTTPException(status_code=409, detail=f"Tool '{payload.name}' already exists")
+    elif existing_custom:
+        raise HTTPException(status_code=409, detail=f"Tool '{payload.name}' already exists")
+
+    doc = {
+        "app_name": app_name,
+        "name": payload.name,
+        "description": payload.description,
+        "category": payload.category,
+        "parameters": payload.parameters,
+        "source_schema": payload.source_schema,
+        "method": payload.method or "POST",
+        "path": payload.path or "",
+        "base_url": payload.base_url or "",
+        "enabled": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.custom_tools.insert_one(doc)
+    return {"status": "created", "tool": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@tools_router.get("/{app_name}", dependencies=[Depends(require_admin)])
+async def universal_list_custom_tools(app_name: str):
+    custom_tools = await db.custom_tools.find({"app_name": app_name}, {"_id": 0}).to_list(200)
+    tools = []
+    for ct in custom_tools:
+        tools.append({
+            "name": ct["name"],
+            "description": ct.get("description", ""),
+            "parameters": ct.get("parameters", []),
+            "category": ct.get("category", "custom"),
+            "source": "custom",
+            "enabled": ct.get("enabled", True),
+            "method": ct.get("method", ""),
+            "path": ct.get("path", ""),
+            "base_url": ct.get("base_url", ""),
+        })
+    return {"tools": tools}
+
+
+@tools_router.put("/{app_name}/{tool_name}", dependencies=[Depends(require_admin)])
+async def universal_update_custom_tool(app_name: str, tool_name: str, payload: dict):
+    update = {}
+    for field in ["name", "description", "category", "parameters", "enabled", "method", "path", "base_url"]:
+        if field in payload:
+            update[field] = payload[field]
+    if not update:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    result = await db.custom_tools.update_one(
+        {"app_name": app_name, "name": tool_name},
+        {"$set": update},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Custom tool not found")
+    return {"status": "updated", "tool_name": tool_name}
+
+
+@tools_router.delete("/{app_name}/{tool_name}", dependencies=[Depends(require_admin)])
+async def universal_delete_custom_tool(app_name: str, tool_name: str):
+    result = await db.custom_tools.delete_one({"app_name": app_name, "name": tool_name})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Custom tool not found")
+    return {"status": "deleted", "tool_name": tool_name}
+
+
+@tools_router.post("/{app_name}/{tool_name}/execute", dependencies=[Depends(require_jwt_or_api_key)])
+async def universal_execute_custom_tool(app_name: str, tool_name: str, payload: dict):
+    custom_tool = await db.custom_tools.find_one(
+        {"app_name": app_name, "name": tool_name}, {"_id": 0}
+    )
+    if not custom_tool:
+        raise HTTPException(status_code=404, detail=f"Custom tool '{tool_name}' not found")
+
+    base_url = custom_tool.get("base_url", "")
+    method = custom_tool.get("method", "GET").upper()
+    path = custom_tool.get("path", "")
+    parameters = payload.get("parameters", {})
+
+    if base_url:
+        import httpx
+        url = base_url
+        params = dict(parameters)
+        for key in list(params.keys()):
+            placeholder = "{" + key + "}"
+            if placeholder in url:
+                url = url.replace(placeholder, str(params.pop(key)))
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if method in ("POST", "PUT", "PATCH"):
+                    resp = await client.request(method, url, json=params)
+                else:
+                    resp = await client.request(method, url, params=params if params else None)
+                try:
+                    return {"result": resp.json()}
+                except Exception:
+                    return {"result": resp.text}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    elif app_name == "chatwoot":
+        config = _get_chatwoot_config()
+        if not config["chatwoot_url"] or not config["api_token"]:
+            raise HTTPException(status_code=400, detail="Chatwoot not configured")
+        c = ChatwootClient(config["chatwoot_url"], config["api_token"], config["account_id"])
+        params = dict(parameters)
+        for key in list(params.keys()):
+            placeholder = "{" + key + "}"
+            if placeholder in path:
+                path = path.replace(placeholder, str(params.pop(key)))
+        try:
+            if method in ("POST", "PUT", "PATCH"):
+                result = await c._request(method, path, json=params)
+            else:
+                result = await c._request(method, path, params=params or None)
+            return {"result": result}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    else:
+        raise HTTPException(status_code=400, detail="Custom tool has no base_url configured")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1444,6 +1720,7 @@ app.include_router(auth_router)
 app.include_router(apps_router)
 app.include_router(chatwoot_router)
 app.include_router(servers_router)
+app.include_router(tools_router)
 app.include_router(marketplace_router)
 
 app.router.routes.append(Route("/api/chatwoot/mcp/sse", endpoint=handle_sse))
