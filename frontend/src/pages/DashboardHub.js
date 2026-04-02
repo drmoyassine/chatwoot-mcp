@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
-import {
-  Server, ChevronRight, LogOut, Key, Loader2, Plus,
-  Play, Square, Trash2, GitBranch, Store, Share2,
-} from "lucide-react";
+import { Server, ChevronRight, LogOut, Key, Loader as Loader2, Plus, Play, Square, Trash2, GitBranch, Store, Share2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddServerModal } from "@/components/AddServerModal";
