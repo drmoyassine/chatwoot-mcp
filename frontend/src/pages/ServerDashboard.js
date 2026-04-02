@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Server, ArrowLeft, LogOut, Play, Square, Loader2, RefreshCw,
   Settings, ChevronDown, ChevronRight, Eye, EyeOff, Save, Radio,
-  Key, GitBranch, AlertCircle, Wifi, WifiOff, Zap,
+  Key, GitBranch, AlertCircle, Wifi, WifiOff, Zap, Plus, Trash2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ export default function ServerDashboard() {
   const [editingCreds, setEditingCreds] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
   const [showValues, setShowValues] = useState({});
+  const [newEnvKey, setNewEnvKey] = useState("");
 
   // Tool execution
   const [execResult, setExecResult] = useState(null);
@@ -92,9 +93,13 @@ export default function ServerDashboard() {
   const handleSaveCredentials = async () => {
     setSavingCreds(true);
     try {
-      await api().post(`/api/servers/${serverName}/credentials`, { credentials: credInputs });
+      await api().post(`/api/servers/${serverName}/credentials`, {
+        credentials: credInputs,
+        credentials_schema: serverInfo.credentials_schema || [],
+      });
       setEditingCreds(false);
       setCredInputs({});
+      setNewEnvKey("");
       await fetchCredentials();
       await fetchServer();
     } catch (e) {
@@ -299,6 +304,7 @@ export default function ServerDashboard() {
                 </>
               ) : (
                 <>
+                  {/* Existing schema entries */}
                   {(serverInfo.credentials_schema?.length > 0
                     ? serverInfo.credentials_schema
                     : [{ key: "API_KEY", label: "API Key", required: false }]
@@ -319,8 +325,45 @@ export default function ServerDashboard() {
                       {cs.hint && <p className="text-[10px] text-[#999] mt-1">{cs.hint}</p>}
                     </div>
                   ))}
+
+                  {/* Add new env var */}
+                  <div className="pt-2 border-t border-dashed border-[#E5E5E5]">
+                    <label className="text-[10px] font-medium text-[#999] mb-1.5 block uppercase tracking-wider">
+                      Add custom environment variable
+                    </label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={newEnvKey}
+                        onChange={(e) => setNewEnvKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))}
+                        placeholder="ENV_VAR_NAME"
+                        className="flex-1 rounded-none border-[#E5E5E5] font-mono text-xs h-7"
+                        data-testid="new-env-key-input"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-none text-xs h-7 px-2"
+                        disabled={!newEnvKey.trim()}
+                        onClick={() => {
+                          if (!newEnvKey.trim()) return;
+                          const key = newEnvKey.trim();
+                          // Add to schema
+                          const schema = [...(serverInfo.credentials_schema || [])];
+                          if (!schema.find((s) => s.key === key)) {
+                            schema.push({ key, label: key, required: false });
+                            setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                          }
+                          setNewEnvKey("");
+                        }}
+                        data-testid="add-new-env-button"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1 rounded-none text-xs" onClick={() => { setEditingCreds(false); setCredInputs({}); }}>
+                    <Button variant="outline" size="sm" className="flex-1 rounded-none text-xs" onClick={() => { setEditingCreds(false); setCredInputs({}); setNewEnvKey(""); }}>
                       Cancel
                     </Button>
                     <Button

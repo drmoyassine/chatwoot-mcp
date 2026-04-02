@@ -113,6 +113,7 @@ class AddServerPayload(BaseModel):
 
 class SaveCredentialsPayload(BaseModel):
     credentials: dict = {}  # {"API_KEY": "value", ...}
+    credentials_schema: list = []  # Optional: update the schema too
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -995,7 +996,10 @@ async def save_server_credentials(server_name: str, payload: SaveCredentialsPayl
     )
 
     # Mark as configured
-    await db.mcp_servers.update_one({"name": server_name}, {"$set": {"configured": True}})
+    update_fields = {"configured": True}
+    if payload.credentials_schema is not None:
+        update_fields["credentials_schema"] = payload.credentials_schema
+    await db.mcp_servers.update_one({"name": server_name}, {"$set": update_fields})
     return {"status": "saved"}
 
 

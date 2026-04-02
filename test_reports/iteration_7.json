@@ -1,0 +1,66 @@
+{
+  "summary": "Completed comprehensive testing of editable credentials_schema feature in AddServerModal and ServerDashboard. All 7 backend tests passed (100%). All frontend flows working correctly. Fixed a bug where empty credentials_schema array was not being saved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "GET /api/servers/memory returns server info with credentials_schema",
+    "POST /api/servers/{name}/credentials with credentials_schema updates the schema in mcp_servers collection",
+    "POST /api/servers/{name}/credentials with multiple env vars saves all vars",
+    "POST /api/servers/{name}/credentials with empty schema clears the schema (BUG FIXED)",
+    "credentials_schema persists in database across multiple GET calls",
+    "POST /api/servers/add with custom credentials_schema saves the schema",
+    "POST /api/servers/parse-github returns server info",
+    "Frontend: AddServerModal 'Add Variable' button visible in preview step",
+    "Frontend: AddServerModal clicking 'Add Variable' adds new empty row",
+    "Frontend: AddServerModal env var key auto-uppercases and removes non-alphanumeric chars",
+    "Frontend: AddServerModal Required/Optional toggle works (REQ/OPT label)",
+    "Frontend: AddServerModal Remove button (trash icon) visible",
+    "Frontend: AddServerModal description/label input works",
+    "Frontend: ServerDashboard 'Add custom environment variable' input visible when editing",
+    "Frontend: ServerDashboard new env var key auto-uppercases",
+    "Frontend: ServerDashboard Add button (+) appends new var to schema",
+    "Frontend: ServerDashboard saving credentials sends credentials_schema to backend",
+    "Frontend: DashboardHub Installed and Marketplace tabs work correctly",
+    "Frontend: Marketplace shows 12 curated servers with categories",
+    "Frontend: Marketplace search filters cards (github -> 1 result)",
+    "Frontend: Marketplace category filter works (developer -> 2 results)",
+    "Frontend: /dashboard/chatwoot loads ChatwootDashboard (not ServerDashboard)",
+    "Frontend: /dashboard/{serverName} loads ServerDashboard for dynamic servers"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_credentials_schema.py",
+    "/app/test_reports/pytest/pytest_credentials_schema.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/server.py (line 1000: fixed empty credentials_schema not being saved)",
+    "/app/backend/tests/test_credentials_schema.py (new test file - 7 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 tests passed)",
+    "frontend": "100% (all flows working)"
+  },
+  "test_credentials": {
+    "admin_email": "admin@mcphub.local",
+    "admin_password": "McpHub2026!",
+    "backend_url": "https://gracious-dewdney-2.preview.emergentagent.com"
+  },
+  "seed_data_creation": "Test servers (test-creds-server) created and cleaned up during testing. MY_CUSTOM_API_KEY added to memory server schema during testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Editable credentials_schema feature fully implemented and tested. Key changes: 1) AddServerModal.js has editable env vars in preview step with add/remove/edit/toggle functionality (testids: add-env-var-button, env-key-{idx}, env-required-{idx}, env-remove-{idx}, env-label-{idx}). 2) ServerDashboard.js has 'Add custom environment variable' section when editing credentials (testids: new-env-key-input, add-new-env-button). 3) Backend POST /api/servers/{name}/credentials now accepts credentials_schema in payload and updates mcp_servers collection. 4) Fixed bug where empty credentials_schema array was not being saved (changed 'if payload.credentials_schema:' to 'if payload.credentials_schema is not None:'). All marketplace and DashboardHub features continue to work correctly.",
+  "bug_fixed": {
+    "description": "Empty credentials_schema array was not being saved to database",
+    "location": "/app/backend/server.py line 1000",
+    "root_cause": "Condition 'if payload.credentials_schema:' is falsy for empty list []",
+    "fix": "Changed to 'if payload.credentials_schema is not None:' to allow empty arrays"
+  }
+}

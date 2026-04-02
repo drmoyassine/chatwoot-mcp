@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { X, Upload, Loader2, GitBranch, AlertCircle, Check, Server } from "lucide-react";
+import { X, Upload, Loader2, GitBranch, AlertCircle, Check, Server, Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function AddServerModal({ onClose, onAdded }) {
@@ -176,24 +177,92 @@ export function AddServerModal({ onClose, onAdded }) {
                 />
               </div>
 
-              {/* Credentials schema */}
-              {serverInfo.credentials_schema?.length > 0 && (
-                <div>
-                  <label className="text-xs font-medium text-[#666] mb-1.5 block uppercase tracking-wider">
-                    Required Credentials
+              {/* Editable Credentials / Environment Variables */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-medium text-[#666] uppercase tracking-wider">
+                    Environment Variables
                   </label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[10px] font-mono text-[#002FA7] hover:bg-[#002FA7]/5 rounded-none px-2"
+                    onClick={() => {
+                      const schema = [...(serverInfo.credentials_schema || [])];
+                      schema.push({ key: "", label: "", required: false, hint: "" });
+                      setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                    }}
+                    data-testid="add-env-var-button"
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Variable
+                  </Button>
+                </div>
+                {serverInfo.credentials_schema?.length > 0 ? (
                   <div className="bg-[#FAFAFA] border border-[#E5E5E5] divide-y divide-[#E5E5E5]">
-                    {serverInfo.credentials_schema.map((cs) => (
-                      <div key={cs.key} className="px-3 py-2 flex items-center gap-2 text-xs">
-                        <span className="font-mono font-semibold text-[#0A0A0A]">{cs.key}</span>
-                        <span className="text-[#888]">{cs.label}</span>
-                        {cs.required && <Badge variant="outline" className="text-[9px] text-[#FF6B00] border-[#FF6B00]/30 px-1 py-0">Required</Badge>}
+                    {serverInfo.credentials_schema.map((cs, idx) => (
+                      <div key={idx} className="px-3 py-2.5 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={cs.key}
+                            onChange={(e) => {
+                              const schema = [...serverInfo.credentials_schema];
+                              schema[idx] = { ...schema[idx], key: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") };
+                              if (!schema[idx].label || schema[idx].label === cs.key) {
+                                schema[idx].label = e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "");
+                              }
+                              setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                            }}
+                            placeholder="ENV_VAR_NAME"
+                            className="flex-1 rounded-none border-[#E5E5E5] font-mono text-xs h-7"
+                            data-testid={`env-key-${idx}`}
+                          />
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <Switch
+                              checked={cs.required}
+                              onCheckedChange={(checked) => {
+                                const schema = [...serverInfo.credentials_schema];
+                                schema[idx] = { ...schema[idx], required: checked };
+                                setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                              }}
+                              className="scale-75"
+                              data-testid={`env-required-${idx}`}
+                            />
+                            <span className="text-[9px] font-mono text-[#999] w-12">{cs.required ? "REQ" : "OPT"}</span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              const schema = serverInfo.credentials_schema.filter((_, i) => i !== idx);
+                              setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                            }}
+                            className="text-[#CCC] hover:text-[#FF2A2A] transition-colors flex-shrink-0"
+                            data-testid={`env-remove-${idx}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <Input
+                          value={cs.label || ""}
+                          onChange={(e) => {
+                            const schema = [...serverInfo.credentials_schema];
+                            schema[idx] = { ...schema[idx], label: e.target.value };
+                            setServerInfo((s) => ({ ...s, credentials_schema: schema }));
+                          }}
+                          placeholder="Description (e.g. API URL for self-hosted instance)"
+                          className="rounded-none border-[#E5E5E5] text-[11px] h-7 text-[#666]"
+                          data-testid={`env-label-${idx}`}
+                        />
                       </div>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[#999] mt-1">You'll configure these after installation</p>
-                </div>
-              )}
+                ) : (
+                  <div className="bg-[#FAFAFA] border border-[#E5E5E5] px-3 py-4 text-center">
+                    <p className="text-[11px] text-[#999]">No environment variables configured</p>
+                    <p className="text-[10px] text-[#BBB] mt-0.5">Add any API keys, URLs, or tokens this server needs</p>
+                  </div>
+                )}
+                <p className="text-[10px] text-[#999] mt-1">You'll set the values after installation. Add any env vars the server needs.</p>
+              </div>
 
               {installError && (
                 <div className="flex items-center gap-2 text-xs text-[#FF2A2A] bg-[#FF2A2A]/5 border border-[#FF2A2A]/20 px-3 py-2">
