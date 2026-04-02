@@ -1,19 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import {
-  Play,
-  Trash2,
-  Copy,
-  Check,
-  Loader2,
-  AlertTriangle,
-  Terminal,
-  Clock,
-  ChevronDown,
-  FileCode2,
-  Braces,
-  Pencil,
-  Plus,
-} from "lucide-react";
+import { Play, Trash2, Copy, Check, Loader as Loader2, TriangleAlert as AlertTriangle, Terminal, Clock, ChevronDown, FileCode as FileCode2, Braces, Pencil, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -57,11 +43,12 @@ function JsonOutput({ data }) {
   );
 }
 
-function generateCurl(tool, baseUrl) {
+function generateCurl(tool, baseUrl, appName) {
   const isAttachment = tool.name === "create_message_with_attachment";
+  const basePath = appName === "chatwoot" ? "/api/chatwoot" : `/api/servers/${appName}`;
   const endpoint = isAttachment
-    ? `${baseUrl}/api/chatwoot/tools/execute-with-file`
-    : `${baseUrl}/api/chatwoot/tools/execute`;
+    ? `${baseUrl}${basePath}/tools/execute-with-file`
+    : `${baseUrl}${basePath}/tools/execute`;
 
   if (isAttachment) {
     const paramObj = {};
@@ -93,16 +80,17 @@ function generateCurl(tool, baseUrl) {
   ].join("\n");
 }
 
-function ApiDocPanel({ tool }) {
+function ApiDocPanel({ tool, appName = "chatwoot" }) {
   const [copiedField, setCopiedField] = useState(null);
   const baseUrl = (process.env.REACT_APP_BACKEND_URL || window.location.origin).replace(/\/$/, "");
 
+  const basePath = appName === "chatwoot" ? "/api/chatwoot" : `/api/servers/${appName}`;
   const isAttachment = tool.name === "create_message_with_attachment";
-  const endpoint = isAttachment ? "/api/chatwoot/tools/execute-with-file" : "/api/chatwoot/tools/execute";
+  const endpoint = isAttachment ? `${basePath}/tools/execute-with-file` : `${basePath}/tools/execute`;
   const method = "POST";
   const fullUrl = `${baseUrl}${endpoint}`;
 
-  const curlExample = useMemo(() => generateCurl(tool, baseUrl), [tool, baseUrl]);
+  const curlExample = useMemo(() => generateCurl(tool, baseUrl, appName), [tool, baseUrl, appName]);
 
   const bodySchema = useMemo(() => {
     if (isAttachment) {
@@ -264,7 +252,7 @@ function ApiDocPanel({ tool }) {
   );
 }
 
-export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, connectionStatus, onEditParam, onAddParam }) {
+export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, connectionStatus, onEditParam, onAddParam, appName = "chatwoot" }) {
   const [params, setParams] = useState({});
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -479,6 +467,7 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
                     <label className="font-mono text-xs text-[#888] w-32 flex-shrink-0 truncate flex items-center gap-1" title={p.name}>
                       {p.name}
                       {p.required && <span className="text-[#FF2A2A] ml-0.5">*</span>}
+                      }
                       {onEditParam && (
                         <Pencil
                           className="w-2.5 h-2.5 opacity-0 group-hover/param:opacity-100 text-[#555] hover:text-[#00E559] cursor-pointer transition-opacity"
@@ -568,7 +557,7 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
               </Button>
               {connectionStatus !== "connected" && (
                 <p className="font-mono text-[10px] text-[#FF2A2A] mt-1 text-center">
-                  Connect to Chatwoot first
+                  Server not connected
                 </p>
               )}
             </div>
@@ -603,7 +592,7 @@ export function TestTerminal({ selectedTool, onExecute, onExecuteWithFile, conne
           </>
         ) : (
           /* API Documentation Pane */
-          <ApiDocPanel tool={selectedTool} />
+          <ApiDocPanel tool={selectedTool} appName={appName} />
         )}
       </div>
 

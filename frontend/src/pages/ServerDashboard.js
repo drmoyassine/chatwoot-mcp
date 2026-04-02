@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate, useParams } from "react-router-dom";
-import { Server, ArrowLeft, LogOut, Play, Square, Loader as Loader2, RefreshCw, Settings, ChevronDown, ChevronRight, Eye, EyeOff, Save, Radio, GitBranch, CircleAlert as AlertCircle, Wifi, WifiOff, Plus } from "lucide-react";
+import { Server, ArrowLeft, LogOut, Play, Square, Loader as Loader2, RefreshCw, Settings, ChevronDown, Eye, EyeOff, Save, Radio, GitBranch, CircleAlert as AlertCircle, Wifi, WifiOff, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ApiKeyManager } from "@/components/ApiKeyManager";
 import { ToolExplorer } from "@/components/ToolExplorer";
+import { TestTerminal } from "@/components/TestTerminal";
 import { CreateToolModal } from "@/components/CreateToolModal";
 
 export default function ServerDashboard() {
@@ -32,12 +33,6 @@ export default function ServerDashboard() {
   const [savingCreds, setSavingCreds] = useState(false);
   const [showValues, setShowValues] = useState({});
   const [newEnvKey, setNewEnvKey] = useState("");
-
-  const [execResult, setExecResult] = useState(null);
-  const [execError, setExecError] = useState(null);
-  const [execLoading, setExecLoading] = useState(false);
-  const [paramValues, setParamValues] = useState({});
-  const [elapsed, setElapsed] = useState(null);
 
   const api = useCallback(() => axiosAuth(), [axiosAuth]);
 
@@ -136,23 +131,11 @@ export default function ServerDashboard() {
   };
 
   const executeTool = async (toolName, parameters) => {
-    setExecLoading(true);
-    setExecError(null);
-    setExecResult(null);
-    const start = performance.now();
-    try {
-      const resp = await api().post(`/api/servers/${serverName}/tools/execute`, {
-        tool_name: toolName,
-        parameters,
-      });
-      setExecResult(resp.data.result);
-      setElapsed(Math.round(performance.now() - start));
-    } catch (e) {
-      setExecError(e.response?.data?.detail || e.message || "Execution failed");
-      setElapsed(Math.round(performance.now() - start));
-    } finally {
-      setExecLoading(false);
-    }
+    const resp = await api().post(`/api/servers/${serverName}/tools/execute`, {
+      tool_name: toolName,
+      parameters,
+    });
+    return resp.data;
   };
 
   const handleToggleTool = async (toolName, enabled) => {
@@ -193,6 +176,7 @@ export default function ServerDashboard() {
   }
 
   const isRunning = serverInfo.status === "connected";
+  const connectionStatus = isRunning ? "connected" : "disconnected";
   const categories = ["all", ...new Set(tools.map((t) => t.category))].sort();
   const filteredTools = tools.filter((t) => {
     const matchesCategory = selectedCategory === "all" || t.category === selectedCategory;
@@ -423,16 +407,22 @@ export default function ServerDashboard() {
           </CollapsibleContent>
         </Collapsible>
 
-        <Collapsible>
+        <Collapsible defaultOpen>
           <CollapsibleTrigger className="w-full flex items-center justify-between px-6 py-3 border-b border-[#E5E5E5] hover:bg-[#EBEBEB] transition-colors duration-150">
             <span className="text-xs font-bold uppercase tracking-[0.2em] text-[#666]">
               <Radio className="w-3.5 h-3.5 inline mr-2" />
-              Server Info
+              MCP Server
             </span>
-            <ChevronRight className="w-4 h-4 text-[#666]" />
+            <ChevronDown className="w-4 h-4 text-[#666]" />
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="p-4 space-y-3 border-b border-[#E5E5E5]">
+              <div>
+                <label className="text-xs font-medium text-[#666] mb-1 block">SSE ENDPOINT</label>
+                <div className="font-mono text-xs text-[#002FA7] bg-white border border-[#E5E5E5] px-3 py-2 break-all">
+                  /api/servers/{serverName}/mcp/sse
+                </div>
+              </div>
               <div>
                 <label className="text-xs font-medium text-[#666] mb-1 block">COMMAND</label>
                 <div className="font-mono text-xs text-[#0A0A0A] bg-white border border-[#E5E5E5] px-3 py-2 break-all">
@@ -452,11 +442,11 @@ export default function ServerDashboard() {
                   </a>
                 </div>
               )}
-              <div>
-                <label className="text-xs font-medium text-[#666] mb-1 block">MCP ENDPOINT</label>
-                <div className="font-mono text-xs text-[#002FA7] bg-white border border-[#E5E5E5] px-3 py-2">
-                  /api/servers/{serverName}/mcp/sse
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#666]">Registered Tools</span>
+                <span className="font-mono text-sm font-bold text-[#002FA7]" data-testid="mcp-tools-count">
+                  {tools.length}
+                </span>
               </div>
               <div>
                 <label className="text-xs font-medium text-[#666] mb-1.5 block">DISCOVERY OUTPUT FORMAT</label>
@@ -557,117 +547,16 @@ export default function ServerDashboard() {
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
                   selectedTool={selectedTool}
-                  onSelectTool={(tool) => { setSelectedTool(tool); setParamValues({}); setExecResult(null); setExecError(null); }}
+                  onSelectTool={setSelectedTool}
                   onToggleTool={handleToggleTool}
                   onCreateTool={() => setShowCreateTool(true)}
                 />
-                <div className="w-full md:w-[400px] lg:w-[500px] flex-shrink-0 bg-[#0A0A0A] text-[#00E559] flex flex-col overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#222] flex items-center justify-between">
-                    <span className="font-mono text-sm font-semibold text-[#00E559] uppercase tracking-wider">
-                      {selectedTool ? selectedTool.name : "Terminal"}
-                    </span>
-                    {elapsed !== null && <span className="font-mono text-[10px] text-[#666]">{elapsed}ms</span>}
-                    }
-                  </div>
-                  {selectedTool ? (
-                    <div className="flex-1 flex flex-col overflow-hidden">
-                      {selectedTool.parameters?.length > 0 && (
-                        <div className="p-4 border-b border-[#222] space-y-3 overflow-y-auto max-h-[300px]">
-                          {selectedTool.parameters.map((p) => (
-                            <div key={p.name}>
-                              <label className="text-[10px] font-mono text-[#888] uppercase flex items-center gap-1">
-                                {p.name}
-                                {p.required && <span className="text-[#FF2A2A]">*</span>}
-                                }
-                                <span className="text-[#444]">({p.type})</span>
-                              </label>
-                              {p.description && <p className="text-[10px] text-[#555] mb-1">{p.description}</p>}
-                              }
-                              {p.enum_options?.length > 0 ? (
-                                <select
-                                  value={paramValues[p.name] || ""}
-                                  onChange={(e) => setParamValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                                  className="w-full bg-[#111] border border-[#333] text-[#E5E5E5] font-mono text-xs px-2 py-1.5"
-                                  data-testid={`param-select-${p.name}`}
-                                >
-                                  <option value="">Select...</option>
-                                  {p.enum_options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-                                  )
-                                  }
-                                </select>
-                              ) : (
-                                <Input
-                                  value={paramValues[p.name] || ""}
-                                  onChange={(e) => setParamValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                                  placeholder={p.default != null ? String(p.default) : ""}
-                                  className="bg-[#111] border-[#333] text-[#E5E5E5] font-mono text-xs rounded-none h-7 placeholder:text-[#444]"
-                                  data-testid={`param-input-${p.name}`}
-                                />
-                              )}
-                            </div>
-                          ))}
-                          <Button
-                            size="sm"
-                            className="w-full bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none text-xs font-mono"
-                            onClick={() => {
-                              const params = {};
-                              selectedTool.parameters.forEach((p) => {
-                                if (paramValues[p.name] !== undefined && paramValues[p.name] !== "") {
-                                  let val = paramValues[p.name];
-                                  if (p.type === "number" || p.type === "integer" || p.type === "int") val = Number(val);
-                                  else if (p.type === "boolean" || p.type === "bool") val = val === "true";
-                                  params[p.name] = val;
-                                }
-                              });
-                              executeTool(selectedTool.name, params);
-                            }}
-                            disabled={execLoading}
-                            data-testid="execute-tool-button"
-                          >
-                            {execLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Play className="w-3 h-3 mr-1.5" />}
-                            Execute
-                          </Button>
-                        </div>
-                      )}
-                      <div className="flex-1 overflow-auto p-4">
-                        {execLoading && <p className="font-mono text-xs text-[#FFCC00] animate-pulse">EXECUTING...</p>}
-                        }
-                        {execError && (
-                          <div className="p-3 border border-[#FF2A2A]/30 bg-[#FF2A2A]/5">
-                            <p className="font-mono text-xs text-[#FF8A8A] whitespace-pre-wrap">{execError}</p>
-                          </div>
-                        )}
-                        {execResult !== null && !execLoading && (
-                          <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-[#E5E5E5]" data-testid="tool-result-output">
-                            {typeof execResult === "string" ? execResult : JSON.stringify(execResult, null, 2)}
-                          </pre>
-                        )}
-                        {!execResult && !execError && !execLoading && selectedTool.parameters?.length === 0 && (
-                          <Button
-                            size="sm"
-                            className="bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none text-xs font-mono"
-                            onClick={() => executeTool(selectedTool.name, {})}
-                            data-testid="execute-tool-button"
-                          >
-                            <Play className="w-3 h-3 mr-1.5" />
-                            Execute (no params)
-                          </Button>
-                        )}
-                        {!execResult && !execError && !execLoading && selectedTool.parameters?.length > 0 && (
-                          <p className="font-mono text-xs text-[#333] text-center py-8">
-                            <span className="text-[#00E559]">_</span> FILL PARAMETERS AND EXECUTE
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex items-center justify-center">
-                      <p className="font-mono text-xs text-[#333]">
-                        <span className="text-[#00E559]">_</span> SELECT A TOOL TO TEST
-                      </p>
-                    </div>
-                  )}
-                </div>
+                <TestTerminal
+                  selectedTool={selectedTool}
+                  onExecute={executeTool}
+                  connectionStatus={connectionStatus}
+                  appName={serverName}
+                />
               </>
             )}
           </div>

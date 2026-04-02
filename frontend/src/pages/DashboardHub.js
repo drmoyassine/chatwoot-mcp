@@ -151,7 +151,7 @@ export default function DashboardHub() {
                 {apps.map((app) => (
                   <div
                     key={app.name}
-                    className="w-full bg-white border border-[#E5E5E5] hover:border-[#002FA7] hover:shadow-sm transition-all p-5 flex items-center gap-4 text-left group cursor-pointer"
+                    className="w-full bg-white border border-[#E5E5E5] hover:border-[#002FA7] hover:shadow-sm transition-all p-5 flex items-center gap-4 text-left group cursor-pointer overflow-hidden"
                     onClick={() => navigate(`/dashboard/${app.name}`)}
                     data-testid={`app-card-${app.name}`}
                   >
@@ -207,7 +207,7 @@ export default function DashboardHub() {
                           <Key className="w-3 h-3" />
                           {app.active_keys} key{app.active_keys !== 1 ? "s" : ""}
                         </span>
-                        <span className="text-[#002FA7]">{app.mcp_endpoint}</span>
+                        <span className="text-[#002FA7] truncate">{app.mcp_endpoint}</span>
                       </div>
                     </div>
 
