@@ -1,0 +1,62 @@
+{
+  "summary": "Completed comprehensive testing of GitHub URL parser fix. All 10 backend tests passed (100%). All frontend flows working correctly. The fix correctly resolves firecrawl-mcp-server repo to npm package 'firecrawl-mcp' (not 'firecrawl-mcp-server' which doesn't exist on npm).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "POST /api/servers/parse-github with firecrawl URL resolves npm_package to 'firecrawl-mcp' (not 'firecrawl-mcp-server')",
+    "POST /api/servers/parse-github with firecrawl URL returns FIRECRAWL_API_KEY in credentials_schema",
+    "POST /api/servers/parse-github with firecrawl URL returns FIRECRAWL_API_URL in credentials_schema",
+    "POST /api/servers/parse-github with firecrawl URL command uses correct package 'firecrawl-mcp'",
+    "POST /api/servers/parse-github with official GitHub MCP URL resolves to '@modelcontextprotocol/server-github'",
+    "POST /api/servers/parse-github with official GitHub MCP URL does NOT resolve to '@modelcontextprotocol/servers' (monorepo root)",
+    "POST /api/servers/parse-github monorepo subpath without README returns empty credentials_schema (expected behavior)",
+    "POST /api/servers/add with npm_package='firecrawl-mcp' installs successfully (not 404)",
+    "GET /api/marketplace/catalog returns 12 curated servers",
+    "GET /api/marketplace/catalog GitHub server has correct npm_package '@modelcontextprotocol/server-github'",
+    "Frontend: AddServerModal with firecrawl URL shows correct package name 'firecrawl-mcp' in preview",
+    "Frontend: AddServerModal with firecrawl URL shows auto-detected FIRECRAWL_API_KEY env var",
+    "Frontend: AddServerModal with firecrawl URL shows auto-detected FIRECRAWL_API_URL env var",
+    "Frontend: AddServerModal 'Add Variable' button works (adds new env var row)",
+    "Frontend: Marketplace shows 12 curated servers with categories",
+    "Frontend: DashboardHub Installed tab shows Chatwoot (CONNECTED) and Memory (RUNNING)",
+    "Frontend: /dashboard/chatwoot loads ChatwootDashboard (not ServerDashboard)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_github_parser_fix.py",
+    "/app/test_reports/pytest/pytest_github_parser.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_github_parser_fix.py (new test file - 10 tests for GitHub parser fix)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (all flows working)"
+  },
+  "test_credentials": {
+    "admin_email": "admin@mcphub.local",
+    "admin_password": "McpHub2026!",
+    "backend_url": "https://gracious-dewdney-2.preview.emergentagent.com"
+  },
+  "seed_data_creation": "Firecrawl server created and cleaned up during installation test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "GitHub URL parser fix fully tested and working. Key changes: 1) mcp_manager.py now fetches actual package.json from GitHub to resolve real npm package name (e.g., firecrawl-mcp-server repo -> firecrawl-mcp package). 2) README is scanned for environment variable hints using regex pattern for UPPER_CASE_WITH_UNDERSCORES. 3) For monorepo subpaths (like modelcontextprotocol/servers/tree/main/src/github), only the subpath's package.json and README are used (not root). 4) install_server_package has fallback to install directly from GitHub if npm registry fails. Verified: firecrawl-mcp exists on npm (v3.11.0), firecrawl-mcp-server does NOT exist (404).",
+  "fix_verification": {
+    "description": "GitHub URL parser now correctly resolves npm package names by fetching package.json",
+    "before_fix": "Parser guessed package name from repo name (e.g., 'firecrawl-mcp-server' which doesn't exist on npm)",
+    "after_fix": "Parser fetches package.json from GitHub and uses the actual 'name' field (e.g., 'firecrawl-mcp')",
+    "npm_verification": {
+      "firecrawl-mcp": "EXISTS on npm (v3.11.0)",
+      "firecrawl-mcp-server": "DOES NOT EXIST on npm (404 error)"
+    }
+  }
+}

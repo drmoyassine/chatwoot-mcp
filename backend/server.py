@@ -11,6 +11,7 @@ import json
 import logging
 import inspect
 import asyncio
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from pydantic import BaseModel
@@ -57,6 +58,7 @@ from mcp_manager import (
     start_server as start_mcp_server, stop_server as stop_mcp_server,
     get_running_server, list_running_servers, parse_github_url,
     install_server_package, restart_server as restart_mcp_server,
+    enrich_from_github,
 )
 
 
@@ -916,6 +918,8 @@ async def parse_github(payload: dict):
         raise HTTPException(status_code=400, detail="GitHub URL required")
     try:
         info = parse_github_url(url)
+        # Enrich with actual package.json and README data from GitHub
+        info = await enrich_from_github(info)
         return {"server_info": info}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -932,8 +936,13 @@ async def add_server(payload: AddServerPayload):
     if existing:
         raise HTTPException(status_code=409, detail=f"Server '{payload.name}' already exists")
 
-    # Install the package
+    # Install the package — extract org/repo from github_url for fallback
     server_info = payload.model_dump()
+    if payload.github_url:
+        gh_match = re.match(r"https?://github\.com/([^/]+)/([^/]+)", payload.github_url)
+        if gh_match:
+            server_info["org"] = gh_match.group(1)
+            server_info["repo"] = gh_match.group(2)
     try:
         install_result = await install_server_package(server_info)
         logger.info(f"Installed {payload.name}: {install_result.get('output', '')[:200]}")
