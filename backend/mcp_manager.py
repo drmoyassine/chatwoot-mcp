@@ -257,7 +257,11 @@ async def install_server_package(server_info: dict) -> dict:
     name = server_info["name"]
 
     if runtime == "node":
-        package = server_info.get("npm_package", name)
+        package = server_info.get("npm_package", "").strip()
+        if not package:
+            # No package to install - skip installation
+            logger.info(f"No npm_package specified for {name}, skipping installation")
+            return {"status": "skipped", "package": "", "output": "No package specified"}
         logger.info(f"Installing npm package: {package}")
         proc = await asyncio.create_subprocess_exec(
             "npm", "install", "-g", package,
@@ -271,7 +275,11 @@ async def install_server_package(server_info: dict) -> dict:
         return {"status": "installed", "package": package, "output": stdout.decode().strip()}
 
     elif runtime == "python":
-        package = server_info.get("pip_package", name)
+        package = server_info.get("pip_package", "").strip()
+        if not package:
+            # No package to install - skip installation
+            logger.info(f"No pip_package specified for {name}, skipping installation")
+            return {"status": "skipped", "package": "", "output": "No package specified"}
         logger.info(f"Installing pip package: {package}")
         proc = await asyncio.create_subprocess_exec(
             "pip", "install", package,
