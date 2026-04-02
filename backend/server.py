@@ -122,6 +122,7 @@ auth_router = APIRouter(prefix="/api/auth")
 apps_router = APIRouter(prefix="/api/apps")
 chatwoot_router = APIRouter(prefix="/api/chatwoot")
 servers_router = APIRouter(prefix="/api/servers")
+marketplace_router = APIRouter(prefix="/api/marketplace")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1106,6 +1107,281 @@ async def remove_server(server_name: str):
     return {"status": "removed"}
 
 
+
+# ══════════════════════════════════════════════════════════════════
+#  MARKETPLACE  (/api/marketplace)
+# ══════════════════════════════════════════════════════════════════
+
+# Curated catalog of popular MCP servers
+CURATED_SERVERS = [
+    {
+        "slug": "github",
+        "name": "GitHub",
+        "description": "Manage repositories, issues, pull requests, and more via the GitHub API",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-github",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "category": "developer",
+        "credentials_schema": [
+            {"key": "GITHUB_PERSONAL_ACCESS_TOKEN", "label": "GitHub Personal Access Token", "required": True, "hint": "Create at github.com/settings/tokens"}
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "gitlab",
+        "name": "GitLab",
+        "description": "Interact with GitLab projects, merge requests, issues, and CI/CD pipelines",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-gitlab",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-gitlab"],
+        "category": "developer",
+        "credentials_schema": [
+            {"key": "GITLAB_PERSONAL_ACCESS_TOKEN", "label": "GitLab Access Token", "required": True},
+            {"key": "GITLAB_API_URL", "label": "GitLab API URL", "required": False},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "slack",
+        "name": "Slack",
+        "description": "Send messages, manage channels, and interact with Slack workspaces",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-slack",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-slack"],
+        "category": "communication",
+        "credentials_schema": [
+            {"key": "SLACK_BOT_TOKEN", "label": "Slack Bot Token", "required": True},
+            {"key": "SLACK_TEAM_ID", "label": "Slack Team ID", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "postgres",
+        "name": "PostgreSQL",
+        "description": "Query and manage PostgreSQL databases with read-only access",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-postgres",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "category": "database",
+        "credentials_schema": [
+            {"key": "POSTGRES_CONNECTION_STRING", "label": "PostgreSQL Connection String", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "brave-search",
+        "name": "Brave Search",
+        "description": "Web and local search powered by the Brave Search API",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-brave-search",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "category": "search",
+        "credentials_schema": [
+            {"key": "BRAVE_API_KEY", "label": "Brave Search API Key", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "filesystem",
+        "name": "Filesystem",
+        "description": "Secure file operations with configurable access controls",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-filesystem",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+        "category": "utility",
+        "credentials_schema": [
+            {"key": "ALLOWED_DIRECTORIES", "label": "Allowed Directories (comma-separated)", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "memory",
+        "name": "Memory",
+        "description": "Knowledge graph-based persistent memory for AI agents",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-memory",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory"],
+        "category": "utility",
+        "credentials_schema": [],
+        "source": "curated",
+    },
+    {
+        "slug": "fetch",
+        "name": "Fetch",
+        "description": "Fetch and convert web content for AI consumption",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-fetch",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-fetch"],
+        "category": "utility",
+        "credentials_schema": [],
+        "source": "curated",
+    },
+    {
+        "slug": "puppeteer",
+        "name": "Puppeteer",
+        "description": "Browser automation and web scraping via headless Chrome",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-puppeteer",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "category": "automation",
+        "credentials_schema": [],
+        "source": "curated",
+    },
+    {
+        "slug": "google-drive",
+        "name": "Google Drive",
+        "description": "Search, read, and manage files in Google Drive",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-gdrive",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-gdrive"],
+        "category": "storage",
+        "credentials_schema": [
+            {"key": "GOOGLE_DRIVE_CREDENTIALS", "label": "Google Service Account JSON", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "sentry",
+        "name": "Sentry",
+        "description": "Retrieve and analyze error reports and issues from Sentry",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/sentry",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-sentry",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-sentry"],
+        "category": "monitoring",
+        "credentials_schema": [
+            {"key": "SENTRY_AUTH_TOKEN", "label": "Sentry Auth Token", "required": True},
+            {"key": "SENTRY_ORGANIZATION", "label": "Sentry Organization Slug", "required": True},
+        ],
+        "source": "curated",
+    },
+    {
+        "slug": "sqlite",
+        "name": "SQLite",
+        "description": "Query and analyze SQLite databases with business intelligence features",
+        "github_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+        "runtime": "node",
+        "npm_package": "@modelcontextprotocol/server-sqlite",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-sqlite"],
+        "category": "database",
+        "credentials_schema": [
+            {"key": "SQLITE_DB_PATH", "label": "SQLite Database Path", "required": True},
+        ],
+        "source": "curated",
+    },
+]
+
+
+@marketplace_router.get("/catalog")
+async def list_catalog(category: str = "", search: str = ""):
+    """List all marketplace servers (curated + community)."""
+    # Combine curated + community from DB
+    community = await db.marketplace.find({}, {"_id": 0}).to_list(200)
+
+    # Get installed server names to mark them
+    installed_names = set()
+    installed_servers = await db.mcp_servers.find({}, {"_id": 0, "name": 1}).to_list(200)
+    for s in installed_servers:
+        installed_names.add(s["name"])
+    # Also include builtin
+    installed_names.add("chatwoot")
+
+    all_entries = []
+    for entry in CURATED_SERVERS:
+        e = {**entry, "installed": entry["slug"] in installed_names}
+        all_entries.append(e)
+
+    for entry in community:
+        e = {**entry, "installed": entry.get("slug", entry.get("name", "")) in installed_names}
+        all_entries.append(e)
+
+    # Filter
+    if category:
+        all_entries = [e for e in all_entries if e.get("category", "") == category]
+    if search:
+        q = search.lower()
+        all_entries = [e for e in all_entries if q in e.get("name", "").lower() or q in e.get("description", "").lower() or q in e.get("slug", "").lower()]
+
+    # Deduplicate by slug
+    seen = set()
+    unique = []
+    for e in all_entries:
+        slug = e.get("slug", e.get("name", ""))
+        if slug not in seen:
+            seen.add(slug)
+            unique.append(e)
+
+    return {"catalog": unique, "categories": sorted(set(e.get("category", "other") for e in unique))}
+
+
+@marketplace_router.post("/publish", dependencies=[Depends(require_admin)])
+async def publish_to_marketplace(payload: dict):
+    """Publish an installed server to the community marketplace."""
+    server_name = payload.get("server_name", "").strip()
+    if not server_name:
+        raise HTTPException(status_code=400, detail="server_name required")
+
+    srv = await db.mcp_servers.find_one({"name": server_name}, {"_id": 0})
+    if not srv:
+        raise HTTPException(status_code=404, detail="Server not found in your installations")
+
+    # Check not already published
+    existing = await db.marketplace.find_one({"slug": server_name}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=409, detail="Already published to marketplace")
+
+    entry = {
+        "slug": server_name,
+        "name": srv.get("display_name", server_name),
+        "description": payload.get("description", srv.get("description", "")),
+        "github_url": srv.get("github_url", ""),
+        "runtime": srv.get("runtime", "node"),
+        "npm_package": srv.get("npm_package", ""),
+        "pip_package": srv.get("pip_package", ""),
+        "command": srv.get("command", ""),
+        "args": srv.get("args", []),
+        "category": payload.get("category", "community"),
+        "credentials_schema": srv.get("credentials_schema", []),
+        "source": "community",
+        "published_at": datetime.now(timezone.utc).isoformat(),
+        "installs": 0,
+    }
+    await db.marketplace.insert_one(entry)
+    return {"status": "published", "slug": server_name}
+
+
+@marketplace_router.delete("/{slug}", dependencies=[Depends(require_admin)])
+async def unpublish_from_marketplace(slug: str):
+    """Remove a server from the community marketplace."""
+    result = await db.marketplace.delete_one({"slug": slug})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found in marketplace")
+    return {"status": "removed"}
+
+
+
 # ══════════════════════════════════════════════════════════════════
 #  MCP SSE Transport (namespaced under chatwoot)
 # ══════════════════════════════════════════════════════════════════
@@ -1155,6 +1431,7 @@ app.include_router(auth_router)
 app.include_router(apps_router)
 app.include_router(chatwoot_router)
 app.include_router(servers_router)
+app.include_router(marketplace_router)
 
 app.router.routes.append(Route("/api/chatwoot/mcp/sse", endpoint=handle_sse))
 app.mount("/api/chatwoot/mcp/messages/", app=sse_transport.handle_post_message)
@@ -1189,6 +1466,7 @@ async def startup():
         await db.api_keys.create_index([("app_name", 1), ("is_active", 1)])
         await db.mcp_servers.create_index("name", unique=True)
         await db.server_credentials.create_index("server_name", unique=True)
+        await db.marketplace.create_index("slug", unique=True)
     except Exception as e:
         logger.warning(f"Index creation deferred: {e}")
 

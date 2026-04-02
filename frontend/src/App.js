@@ -5,6 +5,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import Login from "@/pages/Login";
 import DashboardHub from "@/pages/DashboardHub";
 import ChatwootDashboard from "@/pages/ChatwootDashboard";
+import ServerDashboard from "@/pages/ServerDashboard";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardHub />} />
           <Route path="/dashboard/chatwoot" element={<ChatwootDashboard />} />
+          <Route path="/dashboard/:serverName" element={<ServerDashboard />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

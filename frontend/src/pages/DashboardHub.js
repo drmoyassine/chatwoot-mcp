@@ -3,11 +3,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import {
   Server, ChevronRight, LogOut, Key, Loader2, Plus,
-  Play, Square, Trash2, GitBranch, Zap,
+  Play, Square, Trash2, GitBranch, Store, Share2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AddServerModal } from "@/components/AddServerModal";
+import { Marketplace } from "@/components/Marketplace";
 
 export default function DashboardHub() {
   const { axiosAuth, logout, user } = useAuth();
@@ -16,6 +17,8 @@ export default function DashboardHub() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [actionLoading, setActionLoading] = useState({});
+  const [activeTab, setActiveTab] = useState("installed");
+  const [publishing, setPublishing] = useState(null);
 
   const fetchApps = useCallback(() => {
     const api = axiosAuth();
@@ -53,6 +56,19 @@ export default function DashboardHub() {
     }
   };
 
+  const handlePublish = async (e, serverName) => {
+    e.stopPropagation();
+    setPublishing(serverName);
+    const api = axiosAuth();
+    try {
+      await api.post("/api/marketplace/publish", { server_name: serverName });
+    } catch (err) {
+      console.error("Publish failed:", err);
+    } finally {
+      setPublishing(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F5]" data-testid="dashboard-hub">
       {/* Top Bar */}
@@ -82,156 +98,204 @@ export default function DashboardHub() {
       </header>
 
       {/* Content */}
-      <main className="max-w-4xl mx-auto px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-xl font-bold text-[#0A0A0A] tracking-tight">Installed MCP Servers</h2>
-            <p className="text-sm text-[#666] mt-1">Manage your Model Context Protocol integrations</p>
+      <main className="max-w-5xl mx-auto px-6 py-10">
+        {/* Header with Tabs */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setActiveTab("installed")}
+              className={`px-4 py-2 text-sm font-bold tracking-tight transition-colors border-b-2 ${
+                activeTab === "installed"
+                  ? "text-[#0A0A0A] border-[#002FA7]"
+                  : "text-[#999] border-transparent hover:text-[#666]"
+              }`}
+              data-testid="tab-installed"
+            >
+              <Server className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              Installed
+            </button>
+            <button
+              onClick={() => setActiveTab("marketplace")}
+              className={`px-4 py-2 text-sm font-bold tracking-tight transition-colors border-b-2 ${
+                activeTab === "marketplace"
+                  ? "text-[#0A0A0A] border-[#002FA7]"
+                  : "text-[#999] border-transparent hover:text-[#666]"
+              }`}
+              data-testid="tab-marketplace"
+            >
+              <Store className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              Marketplace
+            </button>
           </div>
-          <Button
-            onClick={() => setShowAddModal(true)}
-            className="bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none font-mono text-xs"
-            data-testid="add-server-button"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1.5" />
-            Add MCP Server
-          </Button>
+          {activeTab === "installed" && (
+            <Button
+              onClick={() => setShowAddModal(true)}
+              className="bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none font-mono text-xs"
+              data-testid="add-server-button"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              Add MCP Server
+            </Button>
+          )}
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-6 h-6 animate-spin text-[#002FA7]" />
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {apps.map((app) => (
-              <div
-                key={app.name}
-                className="w-full bg-white border border-[#E5E5E5] hover:border-[#002FA7] hover:shadow-sm transition-all p-5 flex items-center gap-4 text-left group cursor-pointer"
-                onClick={() => app.type === "builtin" ? navigate(`/dashboard/${app.name}`) : null}
-                data-testid={`app-card-${app.name}`}
-              >
-                <div className={`w-12 h-12 flex items-center justify-center flex-shrink-0 border ${
-                  app.type === "dynamic"
-                    ? "bg-[#0A0A0A]/5 border-[#0A0A0A]/10"
-                    : "bg-[#002FA7]/5 border-[#002FA7]/10"
-                }`}>
-                  {app.type === "dynamic"
-                    ? <GitBranch className="w-5 h-5 text-[#0A0A0A]" />
-                    : <Server className="w-6 h-6 text-[#002FA7]" />
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <h3 className="font-bold text-[#0A0A0A] text-base">{app.display_name}</h3>
-                    {app.type === "dynamic" && (
-                      <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-[#666] border-[#CCC]">
-                        {app.runtime}
-                      </Badge>
-                    )}
-                    {app.type === "dynamic" ? (
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
-                          app.status === "connected"
-                            ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
-                            : app.configured
-                              ? "text-[#FFCC00] border-[#FFCC00]/30 bg-[#FFCC00]/5"
-                              : "text-[#999] border-[#999]/30 bg-[#999]/5"
-                        }`}
-                        data-testid={`server-status-${app.name}`}
-                      >
-                        {app.status === "connected" ? "Running" : app.configured ? "Stopped" : "Not configured"}
-                      </Badge>
-                    ) : (
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
-                          app.configured
-                            ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
-                            : "text-[#999] border-[#999]/30 bg-[#999]/5"
-                        }`}
-                      >
-                        {app.configured ? "Connected" : "Not configured"}
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-[#666] truncate">{app.description}</p>
-                  <div className="flex items-center gap-4 mt-2 text-xs text-[#999] font-mono">
-                    {app.tools_count > 0 && <span>{app.tools_count} tools</span>}
-                    <span className="flex items-center gap-1">
-                      <Key className="w-3 h-3" />
-                      {app.active_keys} key{app.active_keys !== 1 ? "s" : ""}
-                    </span>
-                    <span className="text-[#002FA7]">{app.mcp_endpoint}</span>
-                  </div>
-                </div>
+        {/* Installed Tab */}
+        {activeTab === "installed" && (
+          <>
+            {loading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-6 h-6 animate-spin text-[#002FA7]" />
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {apps.map((app) => (
+                  <div
+                    key={app.name}
+                    className="w-full bg-white border border-[#E5E5E5] hover:border-[#002FA7] hover:shadow-sm transition-all p-5 flex items-center gap-4 text-left group cursor-pointer"
+                    onClick={() => navigate(`/dashboard/${app.name}`)}
+                    data-testid={`app-card-${app.name}`}
+                  >
+                    <div className={`w-12 h-12 flex items-center justify-center flex-shrink-0 border ${
+                      app.type === "dynamic"
+                        ? "bg-[#0A0A0A]/5 border-[#0A0A0A]/10"
+                        : "bg-[#002FA7]/5 border-[#002FA7]/10"
+                    }`}>
+                      {app.type === "dynamic"
+                        ? <GitBranch className="w-5 h-5 text-[#0A0A0A]" />
+                        : <Server className="w-6 h-6 text-[#002FA7]" />
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <h3 className="font-bold text-[#0A0A0A] text-base">{app.display_name}</h3>
+                        {app.type === "dynamic" && (
+                          <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-[#666] border-[#CCC]">
+                            {app.runtime}
+                          </Badge>
+                        )}
+                        {app.type === "dynamic" ? (
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
+                              app.status === "connected"
+                                ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
+                                : app.configured
+                                  ? "text-[#FFCC00] border-[#FFCC00]/30 bg-[#FFCC00]/5"
+                                  : "text-[#999] border-[#999]/30 bg-[#999]/5"
+                            }`}
+                            data-testid={`server-status-${app.name}`}
+                          >
+                            {app.status === "connected" ? "Running" : app.configured ? "Stopped" : "Not configured"}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] font-mono uppercase px-1.5 py-0 ${
+                              app.configured
+                                ? "text-[#00E559] border-[#00E559]/30 bg-[#00E559]/5"
+                                : "text-[#999] border-[#999]/30 bg-[#999]/5"
+                            }`}
+                          >
+                            {app.configured ? "Connected" : "Not configured"}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-[#666] truncate">{app.description}</p>
+                      <div className="flex items-center gap-4 mt-2 text-xs text-[#999] font-mono">
+                        {app.tools_count > 0 && <span>{app.tools_count} tools</span>}
+                        <span className="flex items-center gap-1">
+                          <Key className="w-3 h-3" />
+                          {app.active_keys} key{app.active_keys !== 1 ? "s" : ""}
+                        </span>
+                        <span className="text-[#002FA7]">{app.mcp_endpoint}</span>
+                      </div>
+                    </div>
 
-                {/* Action buttons for dynamic servers */}
-                {app.type === "dynamic" ? (
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {app.status === "connected" ? (
-                      <Button
-                        variant="ghost" size="icon"
-                        className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
-                        onClick={(e) => handleServerAction(e, app.name, "stop")}
-                        disabled={actionLoading[app.name] === "stop"}
-                        data-testid={`stop-server-${app.name}`}
-                        title="Stop server"
-                      >
-                        {actionLoading[app.name] === "stop"
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Square className="w-3.5 h-3.5" />}
-                      </Button>
-                    ) : app.configured ? (
-                      <Button
-                        variant="ghost" size="icon"
-                        className="w-8 h-8 text-[#999] hover:text-[#00E559] hover:bg-[#00E559]/5 rounded-none"
-                        onClick={(e) => handleServerAction(e, app.name, "start")}
-                        disabled={actionLoading[app.name] === "start"}
-                        data-testid={`start-server-${app.name}`}
-                        title="Start server"
-                      >
-                        {actionLoading[app.name] === "start"
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          : <Play className="w-3.5 h-3.5" />}
-                      </Button>
-                    ) : null}
+                    {/* Action buttons for dynamic servers */}
+                    {app.type === "dynamic" ? (
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <Button
+                          variant="ghost" size="icon"
+                          className="w-8 h-8 text-[#999] hover:text-[#002FA7] hover:bg-[#002FA7]/5 rounded-none"
+                          onClick={(e) => handlePublish(e, app.name)}
+                          disabled={publishing === app.name}
+                          data-testid={`share-server-${app.name}`}
+                          title="Share to Marketplace"
+                        >
+                          {publishing === app.name
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Share2 className="w-3.5 h-3.5" />}
+                        </Button>
+                        {app.status === "connected" ? (
+                          <Button
+                            variant="ghost" size="icon"
+                            className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
+                            onClick={(e) => handleServerAction(e, app.name, "stop")}
+                            disabled={actionLoading[app.name] === "stop"}
+                            data-testid={`stop-server-${app.name}`}
+                            title="Stop server"
+                          >
+                            {actionLoading[app.name] === "stop"
+                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              : <Square className="w-3.5 h-3.5" />}
+                          </Button>
+                        ) : app.configured ? (
+                          <Button
+                            variant="ghost" size="icon"
+                            className="w-8 h-8 text-[#999] hover:text-[#00E559] hover:bg-[#00E559]/5 rounded-none"
+                            onClick={(e) => handleServerAction(e, app.name, "start")}
+                            disabled={actionLoading[app.name] === "start"}
+                            data-testid={`start-server-${app.name}`}
+                            title="Start server"
+                          >
+                            {actionLoading[app.name] === "start"
+                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              : <Play className="w-3.5 h-3.5" />}
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost" size="icon"
+                          className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
+                          onClick={(e) => handleServerAction(e, app.name, "delete")}
+                          disabled={!!actionLoading[app.name]}
+                          data-testid={`delete-server-${app.name}`}
+                          title="Remove server"
+                        >
+                          {actionLoading[app.name] === "delete"
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : <Trash2 className="w-3.5 h-3.5" />}
+                        </Button>
+                      </div>
+                    ) : (
+                      <ChevronRight className="w-5 h-5 text-[#CCC] group-hover:text-[#002FA7] transition-colors flex-shrink-0" />
+                    )}
+                  </div>
+                ))}
+
+                {apps.length === 0 && (
+                  <div className="text-center py-16 text-[#999]">
+                    <Server className="w-10 h-10 mx-auto mb-3 text-[#DDD]" />
+                    <p className="font-mono text-sm">No MCP servers installed yet</p>
                     <Button
-                      variant="ghost" size="icon"
-                      className="w-8 h-8 text-[#999] hover:text-[#FF2A2A] hover:bg-[#FF2A2A]/5 rounded-none"
-                      onClick={(e) => handleServerAction(e, app.name, "delete")}
-                      disabled={!!actionLoading[app.name]}
-                      data-testid={`delete-server-${app.name}`}
-                      title="Remove server"
+                      onClick={() => setActiveTab("marketplace")}
+                      className="mt-4 bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none font-mono text-xs"
+                      data-testid="browse-marketplace-button"
                     >
-                      {actionLoading[app.name] === "delete"
-                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        : <Trash2 className="w-3.5 h-3.5" />}
+                      <Store className="w-3.5 h-3.5 mr-1.5" />
+                      Browse Marketplace
                     </Button>
                   </div>
-                ) : (
-                  <ChevronRight className="w-5 h-5 text-[#CCC] group-hover:text-[#002FA7] transition-colors flex-shrink-0" />
                 )}
               </div>
-            ))}
-
-            {/* Empty state */}
-            {apps.length === 0 && (
-              <div className="text-center py-16 text-[#999]">
-                <Server className="w-10 h-10 mx-auto mb-3 text-[#DDD]" />
-                <p className="font-mono text-sm">No MCP servers installed yet</p>
-                <Button
-                  onClick={() => setShowAddModal(true)}
-                  className="mt-4 bg-[#002FA7] hover:bg-[#001B66] text-white rounded-none font-mono text-xs"
-                  data-testid="add-server-empty-button"
-                >
-                  <Plus className="w-3.5 h-3.5 mr-1.5" />
-                  Add your first server
-                </Button>
-              </div>
             )}
-          </div>
+          </>
+        )}
+
+        {/* Marketplace Tab */}
+        {activeTab === "marketplace" && (
+          <Marketplace
+            onInstall={() => fetchApps()}
+          />
         )}
       </main>
 
