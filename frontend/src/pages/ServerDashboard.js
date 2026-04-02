@@ -10,6 +10,7 @@ import { ApiKeyManager } from "@/components/ApiKeyManager";
 import { ToolExplorer } from "@/components/ToolExplorer";
 import { TestTerminal } from "@/components/TestTerminal";
 import { CreateToolModal } from "@/components/CreateToolModal";
+import { ParamEditModal } from "@/components/ParamEditModal";
 
 export default function ServerDashboard() {
   const { serverName } = useParams();
@@ -26,6 +27,8 @@ export default function ServerDashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateTool, setShowCreateTool] = useState(false);
   const [outputFormat, setOutputFormat] = useState("json");
+  const [editingParam, setEditingParam] = useState(null);
+  const [addingParam, setAddingParam] = useState(null);
 
   const [credentials, setCredentials] = useState({});
   const [credInputs, setCredInputs] = useState({});
@@ -136,6 +139,27 @@ export default function ServerDashboard() {
       parameters,
     });
     return resp.data;
+  };
+
+  const handleSaveParam = async (paramData) => {
+    const toolName = editingParam?.tool?.name || addingParam?.name;
+    if (!toolName) return;
+    try {
+      await api().put(
+        `/api/servers/${serverName}/tools/${toolName}/params/${paramData.name}`,
+        paramData,
+      );
+      await fetchTools();
+      if (selectedTool?.name === toolName) {
+        const updatedTools = (await api().get(`/api/servers/${serverName}/tools`)).data.tools;
+        const updated = updatedTools.find((t) => t.name === toolName);
+        if (updated) setSelectedTool(updated);
+      }
+    } catch (e) {
+      console.error("Failed to save param", e);
+    }
+    setEditingParam(null);
+    setAddingParam(null);
   };
 
   const handleToggleTool = async (toolName, enabled) => {
@@ -548,6 +572,8 @@ export default function ServerDashboard() {
                   onSearchChange={setSearchQuery}
                   selectedTool={selectedTool}
                   onSelectTool={setSelectedTool}
+                  onEditParam={(tool, param) => setEditingParam({ tool, param })}
+                  onAddParam={(tool) => setAddingParam(tool)}
                   onToggleTool={handleToggleTool}
                   onCreateTool={() => setShowCreateTool(true)}
                 />
@@ -555,6 +581,8 @@ export default function ServerDashboard() {
                   selectedTool={selectedTool}
                   onExecute={executeTool}
                   connectionStatus={connectionStatus}
+                  onEditParam={(tool, param) => setEditingParam({ tool, param })}
+                  onAddParam={(tool) => setAddingParam(tool)}
                   appName={serverName}
                 />
               </>
@@ -569,6 +597,22 @@ export default function ServerDashboard() {
         )}
       </div>
 
+      {editingParam && (
+        <ParamEditModal
+          param={editingParam.param}
+          toolName={editingParam.tool.name}
+          onSave={handleSaveParam}
+          onClose={() => setEditingParam(null)}
+        />
+      )}
+      {addingParam && (
+        <ParamEditModal
+          param={null}
+          toolName={addingParam.name}
+          onSave={handleSaveParam}
+          onClose={() => setAddingParam(null)}
+        />
+      )}
       {showCreateTool && (
         <CreateToolModal
           categories={categories}

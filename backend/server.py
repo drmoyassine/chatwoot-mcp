@@ -1103,6 +1103,30 @@ async def list_server_tools(server_name: str):
             t["source"] = t.get("source", "builtin")
             tools.append(t)
 
+    overrides = await db.tool_overrides.find({"app_name": server_name}, {"_id": 0}).to_list(500)
+    override_map = {o["tool_name"]: o for o in overrides}
+    for t in tools:
+        ov = override_map.get(t["name"])
+        if ov:
+            if ov.get("description") is not None:
+                t["description"] = ov["description"]
+            if ov.get("category") is not None:
+                t["category"] = ov["category"]
+            if ov.get("enabled") is not None:
+                t["enabled"] = ov["enabled"]
+            if ov.get("param_overrides"):
+                existing = {p["name"]: p for p in t["parameters"]}
+                for po in ov["param_overrides"]:
+                    if po["name"] in existing:
+                        existing[po["name"]].update(po)
+                    else:
+                        t["parameters"].append(po)
+                t["parameters"] = [existing.get(p["name"], p) for p in t["parameters"]]
+                existing_names = {p["name"] for p in t["parameters"]}
+                for po in ov["param_overrides"]:
+                    if po["name"] not in existing_names:
+                        t["parameters"].append(po)
+
     custom_tools = await db.custom_tools.find({"app_name": server_name}, {"_id": 0}).to_list(200)
     for ct in custom_tools:
         tools.append({
@@ -1138,6 +1162,43 @@ async def execute_server_tool(server_name: str, payload: ToolExecutePayload):
         return {"result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@servers_router.put("/{server_name}/tools/{tool_name}/params/{param_name}", dependencies=[Depends(require_admin)])
+async def update_server_tool_param(server_name: str, tool_name: str, param_name: str, param: ParamSchema):
+    param_dict = param.model_dump()
+    existing = await db.tool_overrides.find_one(
+        {"app_name": server_name, "tool_name": tool_name}, {"_id": 0}
+    )
+    if existing and existing.get("param_overrides"):
+        found = False
+        for i, p in enumerate(existing["param_overrides"]):
+            if p["name"] == param_name:
+                existing["param_overrides"][i] = param_dict
+                found = True
+                break
+        if not found:
+            existing["param_overrides"].append(param_dict)
+        await db.tool_overrides.update_one(
+            {"app_name": server_name, "tool_name": tool_name},
+            {"$set": {"param_overrides": existing["param_overrides"]}},
+        )
+    else:
+        await db.tool_overrides.update_one(
+            {"app_name": server_name, "tool_name": tool_name},
+            {"$set": {"param_overrides": [param_dict]}},
+            upsert=True,
+        )
+    return {"status": "updated", "tool_name": tool_name, "param": param_dict}
+
+
+@servers_router.delete("/{server_name}/tools/{tool_name}/params/{param_name}", dependencies=[Depends(require_admin)])
+async def delete_server_tool_param(server_name: str, tool_name: str, param_name: str):
+    await db.tool_overrides.update_one(
+        {"app_name": server_name, "tool_name": tool_name},
+        {"$pull": {"param_overrides": {"name": param_name}}},
+    )
+    return {"status": "deleted", "tool_name": tool_name, "param_name": param_name}
 
 
 @servers_router.get("/{server_name}/output-format", dependencies=[Depends(require_admin)])
