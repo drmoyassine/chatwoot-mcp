@@ -52,6 +52,12 @@ from auth import (
 # ── MCP imports ──
 from mcp_tools import mcp as mcp_server_instance, set_runtime_config, set_output_format, _runtime_config
 from chatwoot_client import ChatwootClient
+from crypto import encrypt, decrypt, encrypt_dict, decrypt_dict
+from mcp_manager import (
+    start_server as start_mcp_server, stop_server as stop_mcp_server,
+    get_running_server, list_running_servers, parse_github_url,
+    install_server_package, restart_server as restart_mcp_server,
+)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -93,6 +99,21 @@ class CreateToolPayload(BaseModel):
     parameters: list = []
     source_schema: str = ""  # Original pasted cURL/JSON
 
+class AddServerPayload(BaseModel):
+    github_url: str = ""
+    name: str = ""
+    display_name: str = ""
+    description: str = ""
+    runtime: str = "node"  # node or python
+    command: str = ""
+    args: list = []
+    npm_package: str = ""
+    pip_package: str = ""
+    credentials_schema: list = []  # [{"key": "API_KEY", "label": "API Key", "required": true}]
+
+class SaveCredentialsPayload(BaseModel):
+    credentials: dict = {}  # {"API_KEY": "value", ...}
+
 
 # ══════════════════════════════════════════════════════════════════
 #  Routers
@@ -100,6 +121,7 @@ class CreateToolPayload(BaseModel):
 auth_router = APIRouter(prefix="/api/auth")
 apps_router = APIRouter(prefix="/api/apps")
 chatwoot_router = APIRouter(prefix="/api/chatwoot")
+servers_router = APIRouter(prefix="/api/servers")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -162,7 +184,7 @@ async def logout(response: Response):
 # ══════════════════════════════════════════════════════════════════
 @apps_router.get("", dependencies=[Depends(require_admin)])
 async def list_apps():
-    """List all installed MCP apps."""
+    """List all installed MCP apps (Chatwoot + dynamic servers)."""
     await _ensure_config_loaded()
     chatwoot_config = _get_chatwoot_config()
     key_count = await db.api_keys.count_documents({"app_name": "chatwoot", "is_active": True})
@@ -175,8 +197,29 @@ async def list_apps():
             "tools_count": len(await _get_tool_definitions()),
             "active_keys": key_count,
             "mcp_endpoint": "/api/chatwoot/mcp/sse",
+            "type": "builtin",
         }
     ]
+    # Dynamic MCP servers from DB
+    servers = await db.mcp_servers.find({}, {"_id": 0}).to_list(100)
+    for srv in servers:
+        srv_name = srv["name"]
+        srv_keys = await db.api_keys.count_documents({"app_name": srv_name, "is_active": True})
+        running = get_running_server(srv_name)
+        apps.append({
+            "name": srv_name,
+            "display_name": srv.get("display_name", srv_name),
+            "description": srv.get("description", ""),
+            "configured": srv.get("configured", False),
+            "tools_count": len(running.get_tools()) if running and running.is_connected else 0,
+            "active_keys": srv_keys,
+            "mcp_endpoint": f"/api/servers/{srv_name}/mcp/sse",
+            "type": "dynamic",
+            "runtime": srv.get("runtime", "node"),
+            "enabled": srv.get("enabled", True),
+            "status": "connected" if (running and running.is_connected) else "stopped",
+            "github_url": srv.get("github_url", ""),
+        })
     return {"apps": apps}
 
 
@@ -243,7 +286,14 @@ async def _ensure_config_loaded():
         return
     config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
     if config and config.get("chatwoot_url"):
-        _set_chatwoot_config(config["chatwoot_url"], config.get("api_token", ""), config.get("account_id", 0))
+        token = config.get("api_token", "")
+        # Decrypt if encrypted
+        if config.get("api_token_encrypted"):
+            try:
+                token = decrypt(token)
+            except Exception:
+                pass  # Legacy plaintext
+        _set_chatwoot_config(config["chatwoot_url"], token, config.get("account_id", 0))
         logger.info(f"Lazy-loaded Chatwoot config from DB: {config['chatwoot_url']}")
 
 
@@ -378,7 +428,8 @@ async def save_config(payload: ConfigPayload):
         {"key": "chatwoot"},
         {"$set": {
             "chatwoot_url": payload.chatwoot_url,
-            "api_token": payload.api_token,
+            "api_token": encrypt(payload.api_token),
+            "api_token_encrypted": True,
             "account_id": payload.account_id,
         }},
         upsert=True,
@@ -851,6 +902,210 @@ async def mcp_info():
     }
 
 
+
+# ══════════════════════════════════════════════════════════════════
+#  DYNAMIC MCP SERVERS  (/api/servers) — protected by JWT
+# ══════════════════════════════════════════════════════════════════
+@servers_router.post("/parse-github", dependencies=[Depends(require_admin)])
+async def parse_github(payload: dict):
+    """Parse a GitHub URL and return detected package info."""
+    url = payload.get("github_url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="GitHub URL required")
+    try:
+        info = parse_github_url(url)
+        return {"server_info": info}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@servers_router.post("/add", dependencies=[Depends(require_admin)])
+async def add_server(payload: AddServerPayload):
+    """Add a new MCP server — install package and register."""
+    if not payload.name:
+        raise HTTPException(status_code=400, detail="Server name required")
+
+    # Check if already exists
+    existing = await db.mcp_servers.find_one({"name": payload.name}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Server '{payload.name}' already exists")
+
+    # Install the package
+    server_info = payload.model_dump()
+    try:
+        install_result = await install_server_package(server_info)
+        logger.info(f"Installed {payload.name}: {install_result.get('output', '')[:200]}")
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Save to DB
+    doc = {
+        "name": payload.name,
+        "display_name": payload.display_name or payload.name.replace("-", " ").title(),
+        "description": payload.description,
+        "runtime": payload.runtime,
+        "command": payload.command,
+        "args": payload.args,
+        "npm_package": payload.npm_package,
+        "pip_package": payload.pip_package,
+        "github_url": payload.github_url,
+        "credentials_schema": payload.credentials_schema,
+        "configured": False,
+        "enabled": True,
+        "installed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.mcp_servers.insert_one(doc)
+    return {"status": "installed", "server": {k: v for k, v in doc.items() if k != "_id"}}
+
+
+@servers_router.get("/{server_name}", dependencies=[Depends(require_admin)])
+async def get_server(server_name: str):
+    """Get server details."""
+    srv = await db.mcp_servers.find_one({"name": server_name}, {"_id": 0})
+    if not srv:
+        raise HTTPException(status_code=404, detail="Server not found")
+    running = get_running_server(server_name)
+    srv["status"] = "connected" if (running and running.is_connected) else "stopped"
+    srv["tools_count"] = len(running.get_tools()) if running and running.is_connected else 0
+    # Check if credentials are saved
+    creds = await db.server_credentials.find_one({"server_name": server_name}, {"_id": 0})
+    srv["has_credentials"] = bool(creds and creds.get("credentials"))
+    return srv
+
+
+@servers_router.post("/{server_name}/credentials", dependencies=[Depends(require_admin)])
+async def save_server_credentials(server_name: str, payload: SaveCredentialsPayload):
+    """Save encrypted credentials for a server."""
+    srv = await db.mcp_servers.find_one({"name": server_name}, {"_id": 0})
+    if not srv:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    # Encrypt all credential values
+    encrypted_creds = {k: encrypt(str(v)) for k, v in payload.credentials.items() if v}
+
+    await db.server_credentials.update_one(
+        {"server_name": server_name},
+        {"$set": {
+            "server_name": server_name,
+            "credentials": encrypted_creds,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+
+    # Mark as configured
+    await db.mcp_servers.update_one({"name": server_name}, {"$set": {"configured": True}})
+    return {"status": "saved"}
+
+
+@servers_router.get("/{server_name}/credentials", dependencies=[Depends(require_admin)])
+async def get_server_credentials(server_name: str):
+    """Get credential keys (values masked) for a server."""
+    creds = await db.server_credentials.find_one({"server_name": server_name}, {"_id": 0})
+    if not creds or not creds.get("credentials"):
+        return {"credentials": {}}
+    # Return masked values
+    masked = {}
+    for k, v in creds["credentials"].items():
+        try:
+            decrypted = decrypt(v)
+            masked[k] = decrypted[:4] + "***" + decrypted[-2:] if len(decrypted) > 6 else "***"
+        except Exception:
+            masked[k] = "***"
+    return {"credentials": masked}
+
+
+@servers_router.post("/{server_name}/start", dependencies=[Depends(require_admin)])
+async def start_server_endpoint(server_name: str):
+    """Start an MCP server process."""
+    srv = await db.mcp_servers.find_one({"name": server_name}, {"_id": 0})
+    if not srv:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    # Get decrypted credentials
+    creds_doc = await db.server_credentials.find_one({"server_name": server_name}, {"_id": 0})
+    env_vars = {}
+    if creds_doc and creds_doc.get("credentials"):
+        for k, v in creds_doc["credentials"].items():
+            try:
+                env_vars[k] = decrypt(v)
+            except Exception:
+                env_vars[k] = v
+
+    server_config = {
+        "name": server_name,
+        "command": srv["command"],
+        "args": srv.get("args", []),
+        "env_vars": env_vars,
+        "runtime": srv.get("runtime", "node"),
+    }
+
+    try:
+        proc = await start_mcp_server(server_config)
+        return {
+            "status": "started",
+            "tools_count": len(proc.get_tools()),
+            "tools": proc.get_tools(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
+
+
+@servers_router.post("/{server_name}/stop", dependencies=[Depends(require_admin)])
+async def stop_server_endpoint(server_name: str):
+    """Stop an MCP server process."""
+    await stop_mcp_server(server_name)
+    return {"status": "stopped"}
+
+
+@servers_router.post("/{server_name}/toggle", dependencies=[Depends(require_admin)])
+async def toggle_server(server_name: str, payload: dict):
+    """Toggle a server on/off."""
+    enabled = payload.get("enabled", True)
+    await db.mcp_servers.update_one({"name": server_name}, {"$set": {"enabled": enabled}})
+    if enabled:
+        # Try to start
+        try:
+            return await start_server_endpoint(server_name)
+        except HTTPException:
+            return {"status": "enabled_but_not_started"}
+    else:
+        await stop_mcp_server(server_name)
+        return {"status": "stopped"}
+
+
+@servers_router.get("/{server_name}/tools", dependencies=[Depends(require_jwt_or_api_key)])
+async def list_server_tools(server_name: str):
+    """List tools for a dynamic MCP server."""
+    running = get_running_server(server_name)
+    if not running or not running.is_connected:
+        raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running")
+    return {"tools": running.get_tools()}
+
+
+@servers_router.post("/{server_name}/tools/execute", dependencies=[Depends(require_jwt_or_api_key)])
+async def execute_server_tool(server_name: str, payload: ToolExecutePayload):
+    """Execute a tool on a dynamic MCP server."""
+    running = get_running_server(server_name)
+    if not running or not running.is_connected:
+        raise HTTPException(status_code=400, detail=f"Server '{server_name}' is not running")
+    try:
+        result = await running.call_tool(payload.tool_name, payload.parameters)
+        return {"result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@servers_router.delete("/{server_name}", dependencies=[Depends(require_admin)])
+async def remove_server(server_name: str):
+    """Remove a server and clean up."""
+    await stop_mcp_server(server_name)
+    await db.mcp_servers.delete_one({"name": server_name})
+    await db.server_credentials.delete_one({"server_name": server_name})
+    await db.api_keys.delete_many({"app_name": server_name})
+    return {"status": "removed"}
+
+
 # ══════════════════════════════════════════════════════════════════
 #  MCP SSE Transport (namespaced under chatwoot)
 # ══════════════════════════════════════════════════════════════════
@@ -899,6 +1154,7 @@ async def api_root():
 app.include_router(auth_router)
 app.include_router(apps_router)
 app.include_router(chatwoot_router)
+app.include_router(servers_router)
 
 app.router.routes.append(Route("/api/chatwoot/mcp/sse", endpoint=handle_sse))
 app.mount("/api/chatwoot/mcp/messages/", app=sse_transport.handle_post_message)
@@ -927,22 +1183,29 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 
 @app.on_event("startup")
 async def startup():
-    # Create indexes (non-blocking — skip if MongoDB isn't ready yet)
+    # Create indexes (non-blocking)
     try:
         await db.api_keys.create_index("key_id", unique=True)
         await db.api_keys.create_index([("app_name", 1), ("is_active", 1)])
+        await db.mcp_servers.create_index("name", unique=True)
+        await db.server_credentials.create_index("server_name", unique=True)
     except Exception as e:
-        logger.warning(f"Index creation deferred (MongoDB may not be ready): {e}")
+        logger.warning(f"Index creation deferred: {e}")
 
-    # Load chatwoot config
+    # Load chatwoot config (with decryption support)
     try:
         config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
         if config:
             if config.get("output_format"):
                 set_output_format(config["output_format"])
-                logger.info(f"Output format: {config['output_format']}")
             if config.get("chatwoot_url"):
-                _set_chatwoot_config(config["chatwoot_url"], config.get("api_token", ""), config.get("account_id", 0))
+                token = config.get("api_token", "")
+                if config.get("api_token_encrypted"):
+                    try:
+                        token = decrypt(token)
+                    except Exception:
+                        pass
+                _set_chatwoot_config(config["chatwoot_url"], token, config.get("account_id", 0))
                 logger.info(f"Loaded Chatwoot config from DB: {config['chatwoot_url']}")
         else:
             url = os.environ.get("CHATWOOT_URL", "")
@@ -951,21 +1214,53 @@ async def startup():
             if url and token:
                 set_runtime_config(url, token, account_id)
                 logger.info(f"Using Chatwoot config from env: {url}")
-            else:
-                logger.warning("No Chatwoot config found. Configure via UI or set env vars.")
     except Exception as e:
-        logger.warning(f"Config loading deferred (MongoDB may not be ready): {e}")
-        # Fall back to env vars
+        logger.warning(f"Config loading deferred: {e}")
         url = os.environ.get("CHATWOOT_URL", "")
         token = os.environ.get("CHATWOOT_API_TOKEN", "")
         account_id = int(os.environ.get("CHATWOOT_ACCOUNT_ID", "0") or "0")
         if url and token:
             set_runtime_config(url, token, account_id)
-            logger.info(f"Using Chatwoot config from env (DB unavailable): {url}")
+
+    # Auto-start enabled dynamic MCP servers
+    try:
+        servers = await db.mcp_servers.find({"enabled": True}, {"_id": 0}).to_list(50)
+        for srv in servers:
+            if not srv.get("configured"):
+                continue
+            try:
+                creds_doc = await db.server_credentials.find_one(
+                    {"server_name": srv["name"]}, {"_id": 0}
+                )
+                env_vars = {}
+                if creds_doc and creds_doc.get("credentials"):
+                    for k, v in creds_doc["credentials"].items():
+                        try:
+                            env_vars[k] = decrypt(v)
+                        except Exception:
+                            env_vars[k] = v
+                server_config = {
+                    "name": srv["name"],
+                    "command": srv["command"],
+                    "args": srv.get("args", []),
+                    "env_vars": env_vars,
+                    "runtime": srv.get("runtime", "node"),
+                }
+                await start_mcp_server(server_config)
+            except Exception as e:
+                logger.warning(f"Failed to auto-start {srv['name']}: {e}")
+    except Exception as e:
+        logger.warning(f"Server auto-start deferred: {e}")
 
     logger.info(f"Admin email: {os.environ.get('ADMIN_EMAIL', 'NOT SET')}")
 
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    # Stop all dynamic servers
+    for name in list_running_servers():
+        try:
+            await stop_mcp_server(name)
+        except Exception:
+            pass
     client.close()
