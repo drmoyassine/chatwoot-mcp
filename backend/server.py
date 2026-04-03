@@ -44,8 +44,9 @@ db = client[_db_name]
 def _ensure_db():
     global client, db
     try:
-        client.admin.command("ping")
+        client.delegate._topology._ensure_opened()
     except Exception:
+        logger.info("MongoDB client was closed, reconnecting...")
         client = AsyncIOMotorClient(mongo_url)
         db = client[_db_name]
     return db
@@ -64,7 +65,7 @@ from auth import (
 
 # ── MCP imports ──
 from mcp_tools import mcp as mcp_server_instance, set_runtime_config, set_output_format, _runtime_config, set_shared_db
-set_shared_db(db)
+set_shared_db(_ensure_db)
 from chatwoot_client import ChatwootClient
 from crypto import encrypt, decrypt, encrypt_dict, decrypt_dict
 from mcp_manager import (

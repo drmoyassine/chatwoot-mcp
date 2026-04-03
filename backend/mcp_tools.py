@@ -33,18 +33,18 @@ def set_output_format(fmt: str):
     _runtime_config["output_format"] = fmt
 
 
-_shared_db = None
+_shared_db_getter = None
 
 
-def set_shared_db(db_ref):
-    global _shared_db
-    _shared_db = db_ref
+def set_shared_db(getter):
+    global _shared_db_getter
+    _shared_db_getter = getter
 
 
 async def _load_config_from_db():
     """Last-resort: load config directly from MongoDB if runtime config is empty."""
     try:
-        db = _shared_db
+        db = _shared_db_getter() if callable(_shared_db_getter) else _shared_db_getter
         if db is None:
             from motor.motor_asyncio import AsyncIOMotorClient
             mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")

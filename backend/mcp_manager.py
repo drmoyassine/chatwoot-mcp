@@ -27,16 +27,16 @@ class MCPServerProcess:
         self.name = server_config["name"]
         self.command = server_config["command"]
         self.args = server_config.get("args", [])
-        self.env_vars = server_config.get("env_vars", {})  # Decrypted
-        self.runtime = server_config.get("runtime", "node")  # node or python
+        self.env_vars = server_config.get("env_vars", {})
+        self.runtime = server_config.get("runtime", "node")
         self.session: Optional[ClientSession] = None
-        self._read_stream = None
-        self._write_stream = None
-        self._client_cm = None
-        self._session_cm = None
         self._tools_cache = []
         self._connected = False
         self._lock = asyncio.Lock()
+        self._stop_event = asyncio.Event()
+        self._started_event = asyncio.Event()
+        self._start_error: Optional[Exception] = None
+        self._server_task: Optional[asyncio.Task] = None
 
     @property
     def is_connected(self):
@@ -47,82 +47,75 @@ class MCPServerProcess:
         async with self._lock:
             if self._connected:
                 return
-            try:
-                # Build environment: inherit current + server-specific vars
-                env = dict(os.environ)
-                env.update(self.env_vars)
+            self._stop_event.clear()
+            self._started_event.clear()
+            self._start_error = None
+            self._server_task = asyncio.create_task(self._run_server_loop())
+            await self._started_event.wait()
+            if self._start_error:
+                self._server_task = None
+                raise self._start_error
 
-                server_params = StdioServerParameters(
-                    command=self.command,
-                    args=self.args,
-                    env=env,
-                )
+    async def _run_server_loop(self):
+        """Run the MCP server lifecycle in a dedicated task.
 
-                # Open the stdio transport
-                self._client_cm = stdio_client(server_params)
-                streams = await self._client_cm.__aenter__()
-                self._read_stream, self._write_stream = streams
-
-                # Create and initialize session
-                self._session_cm = ClientSession(self._read_stream, self._write_stream)
-                self.session = await self._session_cm.__aenter__()
-                await self.session.initialize()
-
-                # Discover tools
-                tools_result = await self.session.list_tools()
-                self._tools_cache = [
-                    {
-                        "name": t.name,
-                        "description": t.description or "",
-                        "parameters": _extract_tool_params(t),
-                        "category": "general",
-                        "source": "mcp",
-                        "enabled": True,
-                    }
-                    for t in tools_result.tools
-                ]
-
-                self._connected = True
-                logger.info(f"[{self.name}] Connected — {len(self._tools_cache)} tools discovered")
-
-            except Exception as e:
-                logger.error(f"[{self.name}] Failed to start: {e}")
-                await self._cleanup()
-                raise
+        By keeping stdio_client and ClientSession as proper async-with blocks
+        inside this single task, anyio cancel scopes are fully contained and
+        cannot leak to the starlette lifespan or other tasks."""
+        try:
+            env = dict(os.environ)
+            env.update(self.env_vars)
+            server_params = StdioServerParameters(
+                command=self.command,
+                args=self.args,
+                env=env,
+            )
+            async with stdio_client(server_params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools_result = await session.list_tools()
+                    self._tools_cache = [
+                        {
+                            "name": t.name,
+                            "description": t.description or "",
+                            "parameters": _extract_tool_params(t),
+                            "category": "general",
+                            "source": "mcp",
+                            "enabled": True,
+                        }
+                        for t in tools_result.tools
+                    ]
+                    self.session = session
+                    self._connected = True
+                    self._started_event.set()
+                    logger.info(f"[{self.name}] Connected — {len(self._tools_cache)} tools discovered")
+                    await self._stop_event.wait()
+        except Exception as e:
+            if not self._started_event.is_set():
+                self._start_error = e
+                self._started_event.set()
+            logger.error(f"[{self.name}] Server loop error: {e}")
+        finally:
+            self._connected = False
+            self.session = None
 
     async def stop(self):
         """Stop the subprocess."""
         async with self._lock:
-            await self._cleanup()
+            self._connected = False
+            self.session = None
+            self._stop_event.set()
+            if self._server_task:
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._server_task), timeout=5.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    self._server_task.cancel()
+                    try:
+                        await self._server_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                self._server_task = None
             logger.info(f"[{self.name}] Stopped")
-
-    async def _cleanup(self):
-        self._connected = False
-        self.session = None
-        session_cm = self._session_cm
-        client_cm = self._client_cm
-        self._session_cm = None
-        self._client_cm = None
-
-        async def _do_exit():
-            try:
-                if session_cm:
-                    await session_cm.__aexit__(None, None, None)
-            except Exception:
-                pass
-            try:
-                if client_cm:
-                    await client_cm.__aexit__(None, None, None)
-            except Exception:
-                pass
-
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(_do_exit()),
-                timeout=5.0,
-            )
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-            pass
 
     def get_tools(self) -> list:
         return self._tools_cache
