@@ -99,18 +99,30 @@ class MCPServerProcess:
     async def _cleanup(self):
         self._connected = False
         self.session = None
-        try:
-            if self._session_cm:
-                await self._session_cm.__aexit__(None, None, None)
-        except Exception:
-            pass
-        try:
-            if self._client_cm:
-                await self._client_cm.__aexit__(None, None, None)
-        except Exception:
-            pass
+        session_cm = self._session_cm
+        client_cm = self._client_cm
         self._session_cm = None
         self._client_cm = None
+
+        async def _do_exit():
+            try:
+                if session_cm:
+                    await session_cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+            try:
+                if client_cm:
+                    await client_cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(_do_exit()),
+                timeout=5.0,
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            pass
 
     def get_tools(self) -> list:
         return self._tools_cache

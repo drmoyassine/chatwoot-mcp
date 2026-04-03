@@ -36,10 +36,22 @@ STATIC_DIR = ROOT_DIR / "static"
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
+_db_name = os.environ['DB_NAME']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[_db_name]
+
+
+def _ensure_db():
+    global client, db
+    try:
+        client.admin.command("ping")
+    except Exception:
+        client = AsyncIOMotorClient(mongo_url)
+        db = client[_db_name]
+    return db
 
 app = FastAPI()
+app.state.shutting_down = False
 
 # In-memory event subscribers for SSE streaming
 webhook_subscribers: list[asyncio.Queue] = []
@@ -51,7 +63,8 @@ from auth import (
 )
 
 # ── MCP imports ──
-from mcp_tools import mcp as mcp_server_instance, set_runtime_config, set_output_format, _runtime_config
+from mcp_tools import mcp as mcp_server_instance, set_runtime_config, set_output_format, _runtime_config, set_shared_db
+set_shared_db(db)
 from chatwoot_client import ChatwootClient
 from crypto import encrypt, decrypt, encrypt_dict, decrypt_dict
 from mcp_manager import (
@@ -197,8 +210,9 @@ async def logout(response: Response):
 async def list_apps():
     """List all installed MCP servers."""
     apps = []
+    current_db = _ensure_db()
     try:
-        servers = await db.mcp_servers.find({}, {"_id": 0}).to_list(100)
+        servers = await current_db.mcp_servers.find({}, {"_id": 0}).to_list(100)
     except Exception as e:
         logger.warning(f"Failed to fetch installed servers: {e}")
         return {"apps": []}
@@ -207,7 +221,7 @@ async def list_apps():
         if not srv_name:
             continue
         try:
-            srv_keys = await db.api_keys.count_documents({"app_name": srv_name, "is_active": True})
+            srv_keys = await current_db.api_keys.count_documents({"app_name": srv_name, "is_active": True})
         except Exception:
             srv_keys = 0
         running = get_running_server(srv_name)
@@ -2009,10 +2023,14 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    # Stop all dynamic servers
-    for name in list_running_servers():
+    if not app.state.shutting_down:
+        app.state.shutting_down = True
+        for name in list_running_servers():
+            try:
+                await stop_mcp_server(name)
+            except Exception:
+                pass
         try:
-            await stop_mcp_server(name)
+            client.close()
         except Exception:
             pass
-    client.close()

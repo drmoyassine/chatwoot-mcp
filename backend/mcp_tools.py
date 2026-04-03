@@ -33,16 +33,25 @@ def set_output_format(fmt: str):
     _runtime_config["output_format"] = fmt
 
 
+_shared_db = None
+
+
+def set_shared_db(db_ref):
+    global _shared_db
+    _shared_db = db_ref
+
+
 async def _load_config_from_db():
     """Last-resort: load config directly from MongoDB if runtime config is empty."""
     try:
-        from motor.motor_asyncio import AsyncIOMotorClient
-        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-        db_name = os.environ.get("DB_NAME", "chatwoot_mcp")
-        client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=3000)
-        db = client[db_name]
+        db = _shared_db
+        if db is None:
+            from motor.motor_asyncio import AsyncIOMotorClient
+            mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+            db_name = os.environ.get("DB_NAME", "chatwoot_mcp")
+            _client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=3000)
+            db = _client[db_name]
         config = await db.mcp_config.find_one({"key": "chatwoot"}, {"_id": 0})
-        client.close()
         if config and config.get("chatwoot_url"):
             set_runtime_config(
                 config["chatwoot_url"],

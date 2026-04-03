@@ -17,10 +17,16 @@ export default function DashboardHub() {
   const [activeTab, setActiveTab] = useState("installed");
   const [publishing, setPublishing] = useState(null);
 
-  const fetchApps = useCallback(() => {
+  const fetchApps = useCallback((retries = 2) => {
     const api = axiosAuth();
     api.get("/api/apps")
-      .then((r) => setApps(r.data.apps || []))
+      .then((r) => {
+        const fetched = r.data.apps || [];
+        setApps((prev) => (fetched.length === 0 && prev.length > 0 && retries > 0) ? prev : fetched);
+        if (fetched.length === 0 && retries > 0) {
+          setTimeout(() => fetchApps(retries - 1), 1000);
+        }
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [axiosAuth]);
